@@ -33,6 +33,16 @@ def normalize_event(event_str):
         return 'end_match'
     return e
 
+def get_squad_lists(team_data):
+    """Haalt veilig starters en substitutes op, ongeacht of team_data een dict of een list is."""
+    if isinstance(team_data, dict):
+        starters = team_data.get('starters', [])
+        subs = team_data.get('substitutes', [])
+        return starters, subs
+    elif isinstance(team_data, list):
+        return team_data, []
+    return [], []
+
 # 1. Page Configuration
 st.set_page_config(
     page_title="Match Report Generator",
@@ -41,32 +51,38 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom Styling (Dark Theme Sports Look)
+# Custom Styling (Dark Theme Sports Look with Readable Metric Styling)
 st.markdown("""
 <style>
-    /* Achtergrond van de hele pagina */
     .main {
         background-color: #0f172a;
     }
-    
-    /* Vormgeving en tekstkleur van de statistiekvakken */
     div[data-testid="stMetric"] {
         background-color: #1e293b !important;
         padding: 15px;
         border-radius: 10px;
         border: 1px solid #334155;
     }
-    
-    /* Tekstkleur van de labels (bijv. "Goals ZaVr2") */
     div[data-testid="stMetric"] label, div[data-testid="stMetricLabel"] p {
         color: #94a3b8 !important;
         font-weight: 600 !important;
     }
-    
-    /* Tekstkleur van de cijfers/waardes (bijv. "3") */
     div[data-testid="stMetricValue"] div {
         color: #ffffff !important;
         font-weight: bold !important;
+    }
+    .event-card {
+        background-color: #1e293b;
+        padding: 10px 15px;
+        border-radius: 8px;
+        margin-bottom: 8px;
+        border-left: 4px solid #ef4444;
+    }
+    .squad-box {
+        background-color: #1e293b;
+        padding: 15px;
+        border-radius: 10px;
+        border: 1px solid #334155;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -76,7 +92,7 @@ with st.sidebar:
     st.header("⚙️ Instellingen")
     st.write("Upload een `.yaml` wedstrijdlogboek om een dashboard en PDF-verslag te genereren.")
     st.markdown("---")
-    st.caption("Match Report Generator v1.1")
+    st.caption("Match Report Generator v1.2")
 
 # 3. Main Header
 st.title("⚽ Match Report Generator")
@@ -284,10 +300,7 @@ if data:
 
         with col_home:
             st.subheader(f"🔴 {home_team_name} (Thuis)")
-            home_data = teams.get('home', {})
-            
-            starters = home_data.get('starters', home_data if isinstance(home_data, list) else [])
-            subs = home_data.get('substitutes', [])
+            starters, subs = get_squad_lists(teams.get('home'))
 
             st.markdown("**Basisopstelling:**")
             for p in starters:
@@ -300,10 +313,7 @@ if data:
 
         with col_away:
             st.subheader(f"🟢 {away_team_name} (Uit)")
-            away_data = teams.get('away', {})
-            
-            starters = away_data.get('starters', away_data if isinstance(away_data, list) else [])
-            subs = away_data.get('substitutes', [])
+            starters, subs = get_squad_lists(teams.get('away'))
 
             st.markdown("**Basisopstelling:**")
             for p in starters:
@@ -348,8 +358,8 @@ if data:
                     </tr>
                     """
 
-            home_starters = teams.get('home', {}).get('starters', []) if isinstance(teams.get('home'), dict) else teams.get('home', [])
-            away_starters = teams.get('away', {}).get('starters', []) if isinstance(teams.get('away'), dict) else teams.get('away', [])
+            home_starters, _ = get_squad_lists(teams.get('home'))
+            away_starters, _ = get_squad_lists(teams.get('away'))
 
             home_squad_html = "".join([f"<li>#{p.get('number', '')} {p.get('name', '')}</li>" for p in home_starters])
             away_squad_html = "".join([f"<li>#{p.get('number', '')} {p.get('name', '')}</li>" for p in away_starters])

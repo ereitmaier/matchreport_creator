@@ -44,30 +44,29 @@ st.set_page_config(
 # Custom Styling (Dark Theme Sports Look)
 st.markdown("""
 <style>
+    /* Achtergrond van de hele pagina */
     .main {
         background-color: #0f172a;
     }
-    .stMetric {
-        background-color: #1e293b;
+    
+    /* Vormgeving en tekstkleur van de statistiekvakken */
+    div[data-testid="stMetric"] {
+        background-color: #1e293b !important;
         padding: 15px;
         border-radius: 10px;
         border: 1px solid #334155;
     }
-    .metric-label {
+    
+    /* Tekstkleur van de labels (bijv. "Goals ZaVr2") */
+    div[data-testid="stMetric"] label, div[data-testid="stMetricLabel"] p {
         color: #94a3b8 !important;
+        font-weight: 600 !important;
     }
-    .event-card {
-        background-color: #1e293b;
-        padding: 10px 15px;
-        border-radius: 8px;
-        margin-bottom: 8px;
-        border-left: 4px solid #ef4444;
-    }
-    .squad-box {
-        background-color: #1e293b;
-        padding: 15px;
-        border-radius: 10px;
-        border: 1px solid #334155;
+    
+    /* Tekstkleur van de cijfers/waardes (bijv. "3") */
+    div[data-testid="stMetricValue"] div {
+        color: #ffffff !important;
+        font-weight: bold !important;
     }
 </style>
 """, unsafe_allow_html=True)

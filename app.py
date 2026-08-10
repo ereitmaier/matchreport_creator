@@ -9,15 +9,33 @@ try:
     def parse_yaml(content_str):
         return yaml.safe_load(content_str)
 except ImportError:
-    # Basic fallback parser for strict structure if PyYAML is missing locally
     import json
     def parse_yaml(content_str):
         st.warning("PyYAML is niet geïnstalleerd. Zorg dat `pyyaml` in requirements.txt staat.")
         return {}
 
+def normalize_event(event_str):
+    """Normaliseert Engelse en Nederlandse gebeurtenissen."""
+    e = str(event_str).lower().strip()
+    if e in ['goal', 'doelpunt']:
+        return 'goal'
+    elif e in ['subst', 'wissel', 'substitution']:
+        return 'subst'
+    elif 'card' in e or 'kaart' in e:
+        return 'card'
+    elif e in ['start of match', 'aanvang wedstrijd']:
+        return 'start_match'
+    elif e in ['end of p1', 'einde periode 1', 'einde 1e helft']:
+        return 'end_p1'
+    elif e in ['start of second part', 'start 2e periode', 'start 2e helft']:
+        return 'start_p2'
+    elif e in ['end of match', 'einde wedstrijd']:
+        return 'end_match'
+    return e
+
 # 1. Page Configuration
 st.set_page_config(
-    page_title="Football Match Report Generator",
+    page_title="Match Report Generator",
     page_icon="⚽",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -58,11 +76,8 @@ st.markdown("""
 with st.sidebar:
     st.header("⚙️ Instellingen")
     st.write("Upload een `.yaml` wedstrijdlogboek om een dashboard en PDF-verslag te genereren.")
-    
     st.markdown("---")
-    pdf_theme = st.selectbox("PDF Thema Kleur", ["Dark Slate (#0f172a)", "Classic White (#ffffff)", "Navy Blue (#1e3a8a)"])
-    st.markdown("---")
-    st.caption("Match Report Generator v1.0")
+    st.caption("Match Report Generator v1.1")
 
 # 3. Main Header
 st.title("⚽ Match Report Generator")
@@ -74,100 +89,110 @@ uploaded_file = st.file_uploader("Upload YAML Wedstrijdbestand", type=["yaml", "
 # Sample Data if no file is uploaded yet
 sample_yaml = """# Voorbeeld Wedstrijd Log
 match:
-  date: "2026-08-08"
-  home: AZ
-  away: ADO Den Haag
+  date: "2026-05-17"
+  home: ZaVr2
+  away: Ajax VR3
 
 teams:
   home:
     starters:
-      - name: Jari De Busser
-        number: 28
-      - name: Elijah Dijkstra
-        number: 22
-      - name: Wouter Goes
+      - name: Lisa
+        number: 1
+      - name: Kim
+        number: 2
+      - name: Mila
         number: 3
-      - name: Lewis Schouten
-        number: 16
-      - name: Mateo Chávez
-        number: 15
-      - name: Dave Kwakman
-        number: 21
-      - name: Peer Koopmeiners
-        number: 6
-      - name: Weslley Patati
+      - name: Sara
+        number: 4
+      - name: Lotte
+        number: 5
+      - name: Dane
         number: 7
-      - name: Kees Smit
-        number: 10
-      - name: Ro-Zangelo Daal
-        number: 11
-      - name: Mexx Meerdink
-        number: 35
-    substitutes:
-      - name: Calvin Stengs
-        number: 14
-      - name: Troy Parrott
+      - name: Britt
+        number: 8
+      - name: Fatima
         number: 9
-
+      - name: Nina
+        number: 10
+      - name: Roos
+        number: 11
+      - name: Anouk
+        number: 15
+    substitutes:
+      - name: Jade
+        number: 6
+      - name: Eva
+        number: 14
+      - name: Fleur
+        number: 17
   away:
     starters:
-      - name: Kilian Nikiema
+      - name: Sofie
         number: 1
-      - name: Pascal Mulder
+      - name: Lena
         number: 3
-      - name: Milan Hokke
-        number: 15
-      - name: Matteo Waem
-        number: 4
-      - name: Sekou Sylla
-        number: 18
-      - name: Juho Kilo
-        number: 25
-      - name: Finn de Bruin
-        number: 16
-      - name: Jalen Hawkins
-        number: 17
-      - name: Daryl van Mieghem
+      - name: Julia
+        number: 5
+      - name: Inge
+        number: 6
+      - name: Hanna
         number: 7
-      - name: Yannick Eduardo
-        number: 46
-      - name: Evan Rottier
+      - name: Noor
+        number: 8
+      - name: Petra
+        number: 9
+      - name: Vera
         number: 11
-    substitutes:
-      - name: Illaijh de Ruijter
-        number: 10
-      - name: Mylian Jiménez
-        number: 14
+      - name: Rosa
+        number: 13
+      - name: Tara
+        number: 16
 
 events:
   - time: "P1 | 00:00"
-    event: "Start of Match"
-  - time: "P2 | 15:00"
-    event: "Goal"
+    event: "Aanvang wedstrijd"
+  - time: "P1 | 00:07"
+    event: "Doelpunt"
     icon: "⚽"
-    player: "Ro-Zangelo Daal"
+    player: "Lotte"
     team: "home"
-    extra: "1-0"
-  - time: "P2 | 22:00"
-    event: "Goal"
-    icon: "⚽"
-    player: "Calvin Stengs"
+    extra: "Jade"
+  - time: "P1 | 00:20"
+    event: "Wissel"
+    icon: "🔄"
+    player: "Jade"
     team: "home"
-    extra: "2-0"
-  - time: "P2 | 28:00"
-    event: "Yellow card"
+    extra: "In: Anouk | Out: Jade"
+  - time: "P1 | 00:28"
+    event: "Gele kaart"
     icon: "🟨"
-    player: "Juho Kilo"
+    player: "Petra"
     team: "away"
-    extra: "Overtreding"
-  - time: "P2 | 45:00"
-    event: "End of Match"
+    extra: ""
+  - time: "P1 | 00:33"
+    event: "Doelpunt"
+    icon: "⚽"
+    player: "Lotte"
+    team: "home"
+    extra: "Fatima"
+  - time: "P1 | 01:24"
+    event: "Einde Periode 1"
+  - time: "P2 | 00:00"
+    event: "Start 2e periode"
+  - time: "P2 | 00:23"
+    event: "Doelpunt"
+    icon: "⚽"
+    player: "Dane"
+    team: "home"
+    extra: "Lotte"
+  - time: "P2 | 00:35"
+    event: "Einde wedstrijd"
 """
 
 if uploaded_file is not None:
     yaml_content = uploaded_file.getvalue().decode("utf-8")
 else:
-    st.info("💡 Tip: Upload een YAML-bestand. Voorbeelddata van **AZ - ADO Den Haag** wordt hieronder getoond.")
+    st.info("💡 Tip: Upload een YAML-bestand. Een voorbeeld-wedstrijd wordt hieronder getoond.")
     yaml_content = sample_yaml
 
 # Parse YAML
@@ -182,12 +207,12 @@ if data:
     teams = data.get('teams', {})
     events = data.get('events', [])
 
-    home_team_name = match.get('home', 'Thuis')
-    away_team_name = match.get('away', 'Uitteam')
+    home_team_name = match.get('home', 'Thuisspelend team')
+    away_team_name = match.get('away', 'Uitspelend team')
     match_date = match.get('date', 'Onbekend')
 
-    # Compute score
-    goals = [e for e in events if e.get('event') == 'Goal']
+    # Compute score flexibly for NL / EN
+    goals = [e for e in events if normalize_event(e.get('event')) == 'goal']
     home_goals = len([g for g in goals if g.get('team') == 'home'])
     away_goals = len([g for g in goals if g.get('team') == 'away'])
 
@@ -215,20 +240,21 @@ if data:
 
         # Stats Cards
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Doelpunten AZ", home_goals)
-        c2.metric("Doelpunten ADO", away_goals)
+        c1.metric(f"Goals {home_team_name}", home_goals)
+        c2.metric(f"Goals {away_team_name}", away_goals)
         
-        home_subs = len([e for e in events if e.get('event') == 'Subst' and e.get('team') == 'home'])
-        away_subs = len([e for e in events if e.get('event') == 'Subst' and e.get('team') == 'away'])
-        c3.metric("Wissels (AZ / ADO)", f"{home_subs} / {away_subs}")
+        home_subs = len([e for e in events if normalize_event(e.get('event')) == 'subst' and e.get('team') == 'home'])
+        away_subs = len([e for e in events if normalize_event(e.get('event')) == 'subst' and e.get('team') == 'away'])
+        c3.metric(f"Wissels ({home_team_name} / {away_team_name})", f"{home_subs} / {away_subs}")
         
-        cards_count = len([e for e in events if 'card' in e.get('event', '').lower()])
+        cards_count = len([e for e in events if normalize_event(e.get('event')) == 'card'])
         c4.metric("Kaarten", cards_count)
 
         st.subheader("⏱️ Wedstrijdtijdlijn")
         for e in events:
             time_str = e.get('time', '')
-            event_name = e.get('event', '')
+            event_raw = e.get('event', '')
+            event_norm = normalize_event(event_raw)
             icon = e.get('icon', '📌')
             player = e.get('player', '')
             team = e.get('team', '')
@@ -237,16 +263,17 @@ if data:
             badge_color = "#ef4444" if team == "home" else ("#22c55e" if team == "away" else "#94a3b8")
             team_label = home_team_name if team == "home" else (away_team_name if team == "away" else "")
 
-            if event_name in ['Start of Match', 'End of P1', 'Start of second part', 'End of Match']:
-                st.markdown(f"**───── {time_str} | {event_name.upper()} ─────**")
+            if event_norm in ['start_match', 'end_p1', 'start_p2', 'end_match']:
+                st.markdown(f"**───── {time_str} | {event_raw.upper()} ─────**")
             else:
+                player_str = f" - <span style='color: #cbd5e1;'>{player}</span>" if player else ""
+                extra_str = f" <span style='color: #64748b; font-size: 0.85em;'>({extra})</span>" if extra else ""
                 st.markdown(
                     f"""
                     <div style="background-color: #1e293b; padding: 10px; border-radius: 6px; margin-bottom: 6px; border-left: 5px solid {badge_color};">
                         <span style="color: #94a3b8; font-weight: bold; margin-right: 15px;">{time_str}</span>
                         <span style="font-size: 1.1em; margin-right: 10px;">{icon}</span>
-                        <strong style="color: white;">{event_name}</strong> - <span style="color: #cbd5e1;">{player}</span>
-                        <span style="color: #64748b; font-size: 0.85em; margin-left: 10px;">({extra})</span>
+                        <strong style="color: white;">{event_raw}</strong>{player_str}{extra_str}
                     </div>
                     """, 
                     unsafe_allow_html=True
@@ -257,10 +284,9 @@ if data:
         col_home, col_away = st.columns(2)
 
         with col_home:
-            st.subheader(f"🔴 {home_team_name}")
+            st.subheader(f"🔴 {home_team_name} (Thuis)")
             home_data = teams.get('home', {})
             
-            # Starters / Substitutes
             starters = home_data.get('starters', home_data if isinstance(home_data, list) else [])
             subs = home_data.get('substitutes', [])
 
@@ -274,7 +300,7 @@ if data:
                     st.text(f"#{p.get('number', '')} - {p.get('name', '')}")
 
         with col_away:
-            st.subheader(f"🟢 {away_team_name}")
+            st.subheader(f"🟢 {away_team_name} (Uit)")
             away_data = teams.get('away', {})
             
             starters = away_data.get('starters', away_data if isinstance(away_data, list) else [])
@@ -294,15 +320,16 @@ if data:
         st.subheader("📄 Genereer PDF Rapport")
         st.write("Klik op onderstaande knop om het PDF-rapport op te bouwen en te downloaden.")
 
-        # Function to generate PDF HTML
         def build_html_report():
             timeline_rows = ""
             for e in events:
-                if e.get('event') in ['Start of Match', 'End of P1', 'Start of second part', 'End of Match']:
+                event_raw = e.get('event', '')
+                event_norm = normalize_event(event_raw)
+                if event_norm in ['start_match', 'end_p1', 'start_p2', 'end_match']:
                     timeline_rows += f"""
                     <tr style="background-color: #0f172a; color: #64748b; font-weight: bold; font-size: 8pt;">
                         <td style="padding: 6px;">{e.get('time')}</td>
-                        <td colspan="2" style="padding: 6px;">{e.get('event').upper()}</td>
+                        <td colspan="2" style="padding: 6px;">{event_raw.upper()}</td>
                     </tr>
                     """
                 else:
@@ -311,16 +338,22 @@ if data:
                     badge_cls = "background-color: #ef4444;" if team == 'home' else ("background-color: #22c55e;" if team == 'away' else "")
                     badge = f'<span style="{badge_cls} color: white; font-size: 7pt; padding: 2px 4px; border-radius: 3px; margin-right: 5px;">{t_label}</span>' if t_label else ''
                     icon = e.get('icon', '•')
-                    extra_info = e.get('extra', '')
+                    extra_info = f"({e.get('extra')})" if e.get('extra') else ""
                     player_info = e.get('player', '')
                     
                     timeline_rows += f"""
                     <tr style="border-bottom: 1px solid #334155;">
                         <td style="color: #94a3b8; font-weight: bold; padding: 6px; width: 18%;">{e.get('time')}</td>
                         <td style="text-align: center; width: 8%;">{icon}</td>
-                        <td style="color: #cbd5e1; padding: 6px;">{badge} <strong>{e.get('event')}</strong> {player_info} <span style="color: #64748b; font-size: 8pt;">({extra_info})</span></td>
+                        <td style="color: #cbd5e1; padding: 6px;">{badge} <strong>{event_raw}</strong> {player_info} <span style="color: #64748b; font-size: 8pt;">{extra_info}</span></td>
                     </tr>
                     """
+
+            home_starters = teams.get('home', {}).get('starters', []) if isinstance(teams.get('home'), dict) else teams.get('home', [])
+            away_starters = teams.get('away', {}).get('starters', []) if isinstance(teams.get('away'), dict) else teams.get('away', [])
+
+            home_squad_html = "".join([f"<li>#{p.get('number', '')} {p.get('name', '')}</li>" for p in home_starters])
+            away_squad_html = "".join([f"<li>#{p.get('number', '')} {p.get('name', '')}</li>" for p in away_starters])
 
             return f"""
             <!DOCTYPE html>
@@ -363,6 +396,8 @@ if data:
                     padding-bottom: 5px;
                     margin-bottom: 8px;
                 }}
+                ul {{ list-style: none; padding: 0; margin: 0; font-size: 8.5pt; color: #cbd5e1; }}
+                li {{ padding: 2px 0; border-bottom: 1px solid #283548; }}
             </style>
             </head>
             <body>
@@ -376,12 +411,28 @@ if data:
                 <div style="color: #64748b; font-size: 8.5pt;">Datum: {match_date}</div>
             </div>
 
-            <div class="card">
-                <div class="card-title">⏱️ WEDSTRIJD VERLOOP</div>
-                <table style="width: 100%; border-collapse: collapse; font-size: 8.5pt;">
-                    {timeline_rows}
-                </table>
-            </div>
+            <table style="width: 100%; border-collapse: separate; border-spacing: 10px 0;">
+                <tr>
+                    <td style="width: 60%; vertical-align: top;">
+                        <div class="card">
+                            <div class="card-title">⏱️ WEDSTRIJD VERLOOP</div>
+                            <table style="width: 100%; border-collapse: collapse; font-size: 8.5pt;">
+                                {timeline_rows}
+                            </table>
+                        </div>
+                    </td>
+                    <td style="width: 40%; vertical-align: top;">
+                        <div class="card">
+                            <div class="card-title">🔴 {home_team_name}</div>
+                            <ul>{home_squad_html}</ul>
+                        </div>
+                        <div class="card">
+                            <div class="card-title">🟢 {away_team_name}</div>
+                            <ul>{away_squad_html}</ul>
+                        </div>
+                    </td>
+                </tr>
+            </table>
             </body>
             </html>
             """

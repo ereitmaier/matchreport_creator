@@ -2,6 +2,14 @@ import streamlit as st
 import yaml
 import requests
 import pandas as pd
+import io
+
+# Optionele import van WeasyPrint voor PDF-generatie
+try:
+    from weasyprint import HTML, CSS
+    WEASYPRINT_AVAILABLE = True
+except Exception:
+    WEASYPRINT_AVAILABLE = False
 
 # -----------------------------------------------------------------------------
 # Pagina Configuratie
@@ -38,6 +46,106 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
+# PDF Generator
+# -----------------------------------------------------------------------------
+def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, starters_a, subs_a, events_info):
+    home_team = match_info.get("home", "Thuisploeg")
+    away_team = match_info.get("away", "Uitploeg")
+    match_date = match_info.get("date", "Onbekend")
+    category = match_info.get("category", "B")
+    fmt_val = match_info.get("format", 11)
+    half_duration = match_info.get("half_duration", 45)
+
+    events_html = ""
+    for ev in events_info:
+        t_str = ev.get("time", "")
+        if ev.get("marker"):
+            events_html += f"<tr class='marker-row'><td colspan='4'><b>⏱️ {ev.get('event', '')}</b> ({ev.get('extra', '')})</td></tr>"
+        else:
+            team_name = home_team if ev.get("team") == "home" else (away_team if ev.get("team") == "away" else "-")
+            og = " (Eigen Doelpunt)" if ev.get("own_goal") else ""
+            events_html += f"""
+            <tr>
+                <td><b>{t_str}</b></td>
+                <td>{ev.get('icon', '')} {ev.get('event', '')}{og}</td>
+                <td>{team_name}</td>
+                <td>{ev.get('player', '-')} {f"({ev.get('extra')})" if ev.get('extra') else ''}</td>
+            </tr>
+            """
+
+    def render_player_list(players):
+        if not players:
+            return "<i>Geen spelers opgegeven</i>"
+        return "<br>".join([f"#{p.get('number', '')} {p.get('name', '')}" for p in players])
+
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <style>
+            body {{ font-family: 'Helvetica', 'Arial', sans-serif; color: #333; margin: 20px; }}
+            .header {{ text-align: center; background-color: #1e1e2e; color: #fff; padding: 20px; border-radius: 8px; }}
+            .score {{ font-size: 32px; font-weight: bold; margin: 10px 0; }}
+            .sub-info {{ font-size: 13px; color: #ccc; }}
+            .section-title {{ font-size: 18px; font-weight: bold; border-bottom: 2px solid #2980b9; margin-top: 25px; padding-bottom: 5px; color: #2d2d3f; }}
+            .teams-container {{ display: flex; justify-content: space-between; margin-top: 15px; }}
+            .team-box {{ width: 48%; background: #f8f9fa; padding: 12px; border-radius: 6px; border: 1px solid #ddd; }}
+            .team-box h3 {{ margin-top: 0; color: #2980b9; }}
+            table {{ width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 12px; }}
+            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+            th {{ background-color: #2d2d3f; color: white; }}
+            .marker-row {{ background-color: #eaeded; text-align: center; }}
+            .footer {{ margin-top: 30px; text-align: center; font-size: 10px; color: #888; }}
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <div class="score">{home_team} {home_score} - {away_score} {away_team}</div>
+            <div class="sub-info">Datum: {match_date} | Categorie {category} | Wedstrijdvorm: {fmt_val}v{fmt_val} | Speeltijd: 2x {half_duration} min</div>
+        </div>
+
+        <div class="section-title">👥 Opstellingen</div>
+        <div class="teams-container">
+            <div class="team-box">
+                <h3>🏠 {home_team}</h3>
+                <b>Basis:</b><br>{render_player_list(starters_h)}<br><br>
+                <b>Wissels:</b><br>{render_player_list(subs_h)}
+            </div>
+            <div class="team-box">
+                <h3>🚩 {away_team}</h3>
+                <b>Basis:</b><br>{render_player_list(starters_a)}<br><br>
+                <b>Wissels:</b><br>{render_player_list(subs_a)}
+            </div>
+        </div>
+
+        <div class="section-title">📋 Wedstrijdverloop</div>
+        <table>
+            <thead>
+                <tr>
+                    <th width="15%">Tijd</th>
+                    <th width="35%">Gebeurtenis</th>
+                    <th width="25%">Team</th>
+                    <th width="25%">Speler / Details</th>
+                </tr>
+            </thead>
+            <tbody>
+                {events_html}
+            </tbody>
+        </table>
+
+        <div class="footer">Gegenereerd door Team Level Up Match Report Creator</div>
+    </body>
+    </html>
+    """
+
+    if WEASYPRINT_AVAILABLE:
+        pdf_bytes = HTML(string=html_content).write_pdf()
+        return pdf_bytes
+    else:
+        return html_content.encode('utf-8')
+
+# -----------------------------------------------------------------------------
 # Data Laders
 # -----------------------------------------------------------------------------
 def load_yaml_from_url(url):
@@ -56,7 +164,6 @@ def load_yaml_from_file(uploaded_file):
         st.error(f"Fout bij het lezen van het YAML-bestand: {e}")
         return None
 
-# Helper functie om veilig spelers uit te lezen ongeacht YAML-structuur (dict of list)
 def extract_roster(team_data):
     starters = []
     substitutes = []
@@ -70,7 +177,7 @@ def extract_roster(team_data):
     return starters, substitutes
 
 # -----------------------------------------------------------------------------
-# Sidebar & Routing (Admin vs Live Viewer)
+# Sidebar & Routing
 # -----------------------------------------------------------------------------
 st.sidebar.title("⚽ TLU Match Admin")
 
@@ -115,6 +222,13 @@ if data:
     fmt_val = match_info.get("format", 11)
     half_duration = match_info.get("half_duration", 45)
 
+    # Spelers ophalen
+    home_data = teams_info.get("home", {}) if isinstance(teams_info, dict) else data.get("home", [])
+    starters_h, subs_h = extract_roster(home_data)
+
+    away_data = teams_info.get("away", {}) if isinstance(teams_info, dict) else data.get("away", [])
+    starters_a, subs_a = extract_roster(away_data)
+
     # Bereken de uitslag dynamisch op basis van de gelogde events
     home_score = 0
     away_score = 0
@@ -157,8 +271,23 @@ if data:
 
     st.divider()
 
+    # Genereer PDF data
+    pdf_file_data = generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, starters_a, subs_a, events_info)
+    mime_type = "application/pdf" if WEASYPRINT_AVAILABLE else "text/html"
+    file_ext = "pdf" if WEASYPRINT_AVAILABLE else "html"
+
+    # PDF DownloadKnop in Sidebar
+    st.sidebar.markdown("---")
+    st.sidebar.download_button(
+        label=f"📄 Download Wedstrijdrapport ({file_ext.upper()})",
+        data=pdf_file_data,
+        file_name=f"rapport_{match_date}_{home_team}_vs_{away_team}.{file_ext}",
+        mime=mime_type,
+        use_container_width=True
+    )
+
     # Tabs
-    tab_log, tab_lineup, tab_raw = st.tabs(["📋 Live Wedstrijdverloop", "👥 Opstellingen", "📄 Ruwe YAML Data"])
+    tab_log, tab_lineup, tab_raw = st.tabs(["📋 Live Wedstrijdverloop", "👥 Opstellingen", "📄 Ruwe Data & Export"])
 
     with tab_log:
         st.subheader("Wedstrijdverloop & Gebeurtenissen")
@@ -195,9 +324,6 @@ if data:
         # Thuisploeg
         with col_h:
             st.subheader(f"🏠 {home_team}")
-            home_data = teams_info.get("home", {}) if isinstance(teams_info, dict) else data.get("home", [])
-            starters_h, subs_h = extract_roster(home_data)
-            
             st.markdown("**Basisopstelling / Selectie:**")
             if starters_h:
                 for p in starters_h:
@@ -213,9 +339,6 @@ if data:
         # Uitploeg
         with col_a:
             st.subheader(f"🚩 {away_team}")
-            away_data = teams_info.get("away", {}) if isinstance(teams_info, dict) else data.get("away", [])
-            starters_a, subs_a = extract_roster(away_data)
-            
             st.markdown("**Basisopstelling / Selectie:**")
             if starters_a:
                 for p in starters_a:
@@ -229,15 +352,31 @@ if data:
                     st.write(f"• #{p.get('number', '')} {p.get('name', '')}")
 
     with tab_raw:
-        st.subheader("Ruwe YAML / Exporteren")
-        yaml_string = yaml.dump(data, default_flow_style=False, allow_unicode=True)
+        st.subheader("Exporteer Opties")
+        
+        col_exp1, col_exp2 = st.columns(2)
+        with col_exp1:
+            st.download_button(
+                label=f"📄 Download Wedstrijdrapport als {file_ext.upper()}",
+                data=pdf_file_data,
+                file_name=f"rapport_{match_date}_{home_team}_vs_{away_team}.{file_ext}",
+                mime=mime_type,
+                use_container_width=True
+            )
+            
+        with col_exp2:
+            yaml_string = yaml.dump(data, default_flow_style=False, allow_unicode=True)
+            st.download_button(
+                label="💾 Download als YAML Bestand",
+                data=yaml_string,
+                file_name=f"export_match_{match_date}_{home_team}.yaml",
+                mime="text/yaml",
+                use_container_width=True
+            )
+
+        st.markdown("---")
+        st.subheader("Ruwe YAML Code")
         st.code(yaml_string, language="yaml")
-        st.download_button(
-            label="💾 Download als YAML Bestand",
-            data=yaml_string,
-            file_name=f"export_match_{match_date}_{home_team}.yaml",
-            mime="text/yaml"
-        )
 
 else:
     st.info("👋 Welkom bij de Match Report Creator.")

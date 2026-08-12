@@ -69,7 +69,7 @@ data = None
 
 if file_param:
     st.sidebar.success("🔗 Live Wedstrijd Geladen")
-    base_url = "https://team-level-up.com/match-reporter/saved_matches/"
+    base_url = "https://team-level-up.com/match-reporter/matches/"
     target_url = base_url + file_param
     st.sidebar.caption(f"Bestand: `{file_param}`")
     data = load_yaml_from_url(target_url)

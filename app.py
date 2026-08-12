@@ -1,18 +1,27 @@
 import streamlit as st
+import yaml
+import re
 import json
-import base64
+import requests
 from weasyprint import HTML
 
-# Safely import yaml or provide fallback parser
-try:
-    import yaml
-    def parse_yaml(content_str):
+# ---------------------------------------------------------
+# CONFIGURATIE URL'S (team-level-up.com)
+# ---------------------------------------------------------
+API_LIST_URL = "https://team-level-up.com/match-reporter/get_matches.php"
+BASE_FILE_URL = "https://team-level-up.com/match-reporter/matches/"
+
+# ---------------------------------------------------------
+# 1. HELPER FUNCTIES (NORMALISATIE & PARSING)
+# ---------------------------------------------------------
+
+def parse_yaml_content(content_str):
+    """Veilige parser voor YAML-inhoud."""
+    try:
         return yaml.safe_load(content_str)
-except ImportError:
-    import json
-    def parse_yaml(content_str):
-        st.warning("PyYAML is niet geïnstalleerd. Zorg dat `pyyaml` in requirements.txt staat.")
-        return {}
+    except Exception as e:
+        st.error(f"Fout bij het verwerken van het YAML-bestand: {e}")
+        return None
 
 def normalize_event(event_str):
     """Normaliseert Engelse en Nederlandse gebeurtenissen."""
@@ -34,7 +43,7 @@ def normalize_event(event_str):
     return e
 
 def get_squad_lists(team_data):
-    """Haalt veilig starters en substitutes op, ongeacht of team_data een dict of een list is."""
+    """Haalt veilig starters en substitutes op, ongeacht dict of flat list format."""
     if isinstance(team_data, dict):
         starters = team_data.get('starters', [])
         subs = team_data.get('substitutes', [])
@@ -43,18 +52,100 @@ def get_squad_lists(team_data):
         return team_data, []
     return [], []
 
-# 1. Page Configuration
+# ---------------------------------------------------------
+# 2. SPEELMINUTEN BEREKENEN
+# ---------------------------------------------------------
+
+def calculate_player_minutes(data):
+    """
+    Berekent per speler het aantal gespeelde minuten op basis van
+    de beginopstelling en wissel-events (In: ... | Out: ...).
+    """
+    teams = data.get('teams', {})
+    events = data.get('events', [])
+    
+    # Bepaal totale duur van de wedstrijd uit het laatste tijdevent
+    total_match_minutes = 90
+    for e in reversed(events):
+        time_str = str(e.get('time', ''))
+        match = re.search(r'(\d+):(\d+)', time_str)
+        if match:
+            mins = int(match.group(1))
+            if 'P2' in time_str and mins < 45:
+                mins += 45
+            total_match_minutes = max(total_match_minutes, mins)
+            break
+
+    minutes_summary = {}
+
+    for team_key in ['home', 'away']:
+        team_data = teams.get(team_key)
+        team_name = data.get('match', {}).get(team_key, 'Thuis' if team_key == 'home' else 'Uit')
+        
+        starters_list, subs_list = get_squad_lists(team_data)
+        
+        starters_names = [p.get('name') for p in starters_list if isinstance(p, dict) and p.get('name')]
+        subs_names = [p.get('name') for p in subs_list if isinstance(p, dict) and p.get('name')]
+        
+        all_players = list(set(starters_names + subs_names))
+        
+        player_on_time = {}
+        player_total_mins = {p: 0 for p in all_players}
+
+        # Basisspelers starten op minuut 0
+        for p in starters_names:
+            player_on_time[p] = 0
+
+        # Verwerk wissel-events chronologisch
+        for e in events:
+            event_norm = normalize_event(e.get('event', ''))
+            if event_norm == 'subst' and e.get('team') == team_key:
+                extra = str(e.get('extra', ''))
+                time_str = str(e.get('time', ''))
+                
+                match = re.search(r'(\d+):(\d+)', time_str)
+                event_min = int(match.group(1)) if match else 0
+                if 'P2' in time_str and event_min < 45:
+                    event_min += 45
+
+                in_match = re.search(r'In:\s*([^|]+)', extra)
+                out_match = re.search(r'Out:\s*([^|]+)', extra)
+
+                p_in = in_match.group(1).strip() if in_match else None
+                p_out = out_match.group(1).strip() if out_match else None
+
+                # Uitgewisselde speler stopt met minuten maken
+                if p_out and p_out in player_on_time:
+                    played = event_min - player_on_time[p_out]
+                    player_total_mins[p_out] = player_total_mins.get(p_out, 0) + max(0, played)
+                    del player_on_time[p_out]
+
+                # Invallende speler begint met minuten maken
+                if p_in:
+                    player_on_time[p_in] = event_min
+
+        # Voeg resterende tijd van de wedstrijd toe voor spelers die nog op het veld staan
+        for p, on_min in player_on_time.items():
+            played = total_match_minutes - on_min
+            player_total_mins[p] = player_total_mins.get(p, 0) + max(0, played)
+
+        minutes_summary[team_name] = (player_total_mins, total_match_minutes)
+
+    return minutes_summary
+
+# ---------------------------------------------------------
+# 3. STREAMLIT PAGINA CONFIGURATIE & STYLING
+# ---------------------------------------------------------
+
 st.set_page_config(
-    page_title="Match Report Generator",
+    page_title="Match Report & Analytics",
     page_icon="⚽",
     layout="wide",
-    initial_sidebar_state="collapsed"  # Collapsed by default for mobile view
+    initial_sidebar_state="expanded"
 )
 
-# Custom Responsive Mobile-First Styling
 st.markdown("""
 <style>
-    /* Global Base */
     .main {
         background-color: #0f172a;
         padding: 0.5rem !important;
@@ -69,19 +160,16 @@ st.markdown("""
         text-align: center;
         margin-bottom: 15px;
     }
-    
     .team-title-home {
         color: #ef4444;
         font-weight: bold;
         font-size: clamp(1.2rem, 4vw, 2.2rem);
     }
-    
     .team-title-away {
         color: #22c55e;
         font-weight: bold;
         font-size: clamp(1.2rem, 4vw, 2.2rem);
     }
-    
     .score-badge {
         background-color: #020617;
         color: #f59e0b;
@@ -93,7 +181,7 @@ st.markdown("""
         margin: 5px 0;
     }
 
-    /* Metric Cards Styling (Mobile friendly grid) */
+    /* Metric Cards Styling */
     div[data-testid="stMetric"] {
         background-color: #1e293b !important;
         padding: 10px 12px !important;
@@ -101,56 +189,89 @@ st.markdown("""
         border: 1px solid #334155 !important;
         margin-bottom: 8px !important;
     }
-    
     div[data-testid="stMetric"] label, div[data-testid="stMetricLabel"] p {
         color: #94a3b8 !important;
         font-weight: 600 !important;
         font-size: 0.85rem !important;
     }
-    
     div[data-testid="stMetricValue"] div {
         color: #ffffff !important;
         font-weight: bold !important;
         font-size: 1.3rem !important;
     }
 
-    /* Event Cards on Mobile */
-    .timeline-card {
-        background-color: #1e293b;
-        padding: 10px 12px;
-        border-radius: 8px;
-        margin-bottom: 8px;
-        font-size: 0.95rem;
-        word-break: break-word;
-    }
-
-    /* Mobile media query tweaks */
     @media (max-width: 640px) {
         .stTabs [data-baseweb="tab-list"] {
             gap: 2px;
         }
         .stTabs [data-baseweb="tab"] {
             padding: 8px 10px;
-            font-size: 0.85rem;
+            font-size: 0.82rem;
         }
     }
 </style>
 """, unsafe_allow_html=True)
 
-# 2. Sidebar Settings
+# ---------------------------------------------------------
+# 4. INLADEN VAN WEDSTRIJDDATA (SERVER ARCHIEF / URL / FILE UPLOAD)
+# ---------------------------------------------------------
+
+query_params = st.query_params
+url_file = query_params.get("file", None)
+
+yaml_content = None
+
 with st.sidebar:
-    st.header("⚙️ Instellingen")
-    st.write("Upload een `.yaml` wedstrijdlogboek om een dashboard en PDF-verslag te genereren.")
+    st.header("📂 Wedstrijd Archief")
+    st.caption("Gekoppeld met team-level-up.com")
+    
+    # Haal recente wedstrijden op van team-level-up.com via PHP
+    try:
+        response = requests.get(API_LIST_URL, timeout=4)
+        if response.status_code == 200:
+            match_files = response.json()
+            if isinstance(match_files, list) and len(match_files) > 0:
+                file_options = {f["name"]: f["url"] for f in match_files}
+                
+                # Bepaal standaard index als er een bestand in de URL staat
+                default_index = 0
+                if url_file and url_file in file_options:
+                    default_index = list(file_options.keys()).index(url_file)
+                
+                selected_filename = st.selectbox(
+                    "Selecteer opgeslagen wedstrijd:", 
+                    list(file_options.keys()),
+                    index=default_index
+                )
+                
+                if selected_filename:
+                    fetch_res = requests.get(file_options[selected_filename], timeout=4)
+                    if fetch_res.status_code == 200:
+                        yaml_content = fetch_res.text
+            else:
+                st.info("Nog geen opgeslagen wedstrijden op de server.")
+    except Exception as e:
+        st.caption("ℹ️ Geen verbinding met het online archief.")
+
     st.markdown("---")
-    st.caption("Match Report Generator v1.3 (Mobile Optimized)")
+    st.caption("Match Report Generator v2.1")
 
-# 3. Main Header
-st.title("⚽ Match Report Generator")
+# Fallback: URL Parameter direct inladen indien geselecteerd
+if url_file and not yaml_content:
+    try:
+        res = requests.get(BASE_FILE_URL + url_file, timeout=4)
+        if res.status_code == 200:
+            yaml_content = res.text
+            st.success(f"⚡ Wedstrijd `{url_file}` automatisch ingeladen!")
+    except Exception as err:
+        st.error(f"Fout bij automatisch inladen van bestand: {err}")
 
-# 4. File Upload
-uploaded_file = st.file_uploader("Upload YAML Wedstrijdbestand", type=["yaml", "yml"])
+# Handmatige Upload Optie
+uploaded_file = st.file_uploader("Upload handmatig een YAML-bestand", type=["yaml", "yml"])
+if uploaded_file is not None:
+    yaml_content = uploaded_file.getvalue().decode("utf-8")
 
-# Sample Data if no file is uploaded yet
+# Voorbeelddata indien niks gekozen is
 sample_yaml = """# Voorbeeld Wedstrijd Log
 match:
   date: "2026-05-17"
@@ -253,18 +374,16 @@ events:
     event: "Einde wedstrijd"
 """
 
-if uploaded_file is not None:
-    yaml_content = uploaded_file.getvalue().decode("utf-8")
-else:
-    st.info("💡 Tip: Upload een YAML-bestand. Voorbeelddata wordt hieronder getoond.")
+if not yaml_content:
     yaml_content = sample_yaml
 
-# Parse YAML
-try:
-    data = parse_yaml(yaml_content)
-except Exception as e:
-    st.error(f"Fout bij het lezen van het YAML bestand: {e}")
-    data = None
+data = parse_yaml_content(yaml_content)
+
+# ---------------------------------------------------------
+# 5. STREAMLIT APP WEERGAVE (DASHBOARD, SPEELMINUTEN, PDF)
+# ---------------------------------------------------------
+
+st.title("⚽ Match Report & Analytics")
 
 if data:
     match = data.get('match', {})
@@ -275,22 +394,22 @@ if data:
     away_team_name = match.get('away', 'Uit')
     match_date = str(match.get('date', 'Onbekend'))
 
-    # Compute score flexibly for NL / EN
+    # Compute score
     goals = [e for e in events if normalize_event(e.get('event')) == 'goal']
     home_goals = len([g for g in goals if g.get('team') == 'home'])
     away_goals = len([g for g in goals if g.get('team') == 'away'])
 
-    # Tabs structure (Shortened names for mobile)
-    tab_dash, tab_squads, tab_pdf, tab_yaml = st.tabs([
+    # Tabs Structure
+    tab_dash, tab_minutes, tab_squads, tab_pdf, tab_yaml = st.tabs([
         "📊 Dashboard", 
+        "⏱️ Speelminuten",
         "👥 Opstelling", 
         "📄 PDF Export", 
-        "🛠️ YAML"
+        "🛠️ YAML & Bewaren"
     ])
 
     # --- TAB 1: DASHBOARD ---
     with tab_dash:
-        # Responsive Mobile Scoreboard Card
         st.markdown(
             f"""
             <div class="scoreboard-box">
@@ -299,13 +418,12 @@ if data:
                     <div class="score-badge">{home_goals} - {away_goals}</div>
                     <div class="team-title-away">{away_team_name}</div>
                 </div>
-                <div style="color: #64748b; font-size: 0.85rem; margin-top: 6px;">📅 {match_date}</div>
+                <div style="color: #64748b; font-size: 0.85rem; margin-top: 6px;">📅 Datum: {match_date}</div>
             </div>
             """,
             unsafe_allow_html=True
         )
 
-        # Responsive Stats Cards (2 per row on smaller screens)
         c1, c2 = st.columns(2)
         c3, c4 = st.columns(2)
 
@@ -351,7 +469,29 @@ if data:
                     unsafe_allow_html=True
                 )
 
-    # --- TAB 2: SQUADS ---
+    # --- TAB 2: SPEELMINUTEN OVERZICHT ---
+    with tab_minutes:
+        st.subheader("⏱️ Gespeelde Minuten per Speler")
+        st.write("Automatisch berekend op basis van de opstelling en wissels:")
+        
+        minutes_data = calculate_player_minutes(data)
+        col_m_home, col_m_away = st.columns(2)
+
+        for idx, (team_name, (players_mins, total_mins)) in enumerate(minutes_data.items()):
+            target_col = col_m_home if idx == 0 else col_m_away
+            with target_col:
+                st.markdown(f"### {team_name}")
+                sorted_players = sorted(players_mins.items(), key=lambda x: x[1], reverse=True)
+                
+                if sorted_players:
+                    for p_name, mins in sorted_players:
+                        st.write(f"**{p_name}**: {mins} min")
+                        progress_val = min(max(mins / float(total_mins if total_mins > 0 else 90), 0.0), 1.0)
+                        st.progress(progress_val)
+                else:
+                    st.info("Geen speelminuten/opstelling gevonden voor dit team.")
+
+    # --- TAB 3: SQUADS ---
     with tab_squads:
         col_home, col_away = st.columns(2)
 
@@ -381,7 +521,7 @@ if data:
                 for p in subs:
                     st.text(f"#{p.get('number', '')} - {p.get('name', '')}")
 
-    # --- TAB 3: PDF GENERATION ---
+    # --- TAB 4: PDF GENERATION ---
     with tab_pdf:
         st.subheader("📄 Genereer PDF Rapport")
         st.write("Exporteer de wedstrijd direct naar een A4 PDF-rapport.")
@@ -518,7 +658,15 @@ if data:
         except Exception as err:
             st.error(f"Fout bij het genereren van PDF: {err}")
 
-    # --- TAB 4: RAW YAML ---
+    # --- TAB 5: RAW YAML & BEWAREN ---
     with tab_yaml:
-        st.subheader("🛠️ Ruwe YAML")
+        st.subheader("🛠️ Ruwe YAML Data")
         st.code(yaml_content, language="yaml")
+        
+        st.download_button(
+            label="💾 Bewaar/Download deze YAML",
+            data=yaml_content,
+            file_name=f"match_{home_team_name}_{away_team_name}_{match_date}.yaml",
+            mime="text/yaml",
+            use_container_width=True
+        )

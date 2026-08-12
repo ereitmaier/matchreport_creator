@@ -254,7 +254,7 @@ with st.sidebar:
         st.caption("ℹ️ Geen verbinding met het online archief.")
 
     st.markdown("---")
-    st.caption("Match Report Generator v2.1")
+    st.caption("Match Report Generator v2.2")
 
 # Fallback: URL Parameter direct inladen indien geselecteerd
 if url_file and not yaml_content:
@@ -527,7 +527,7 @@ if data:
         st.write("Exporteer de wedstrijd direct naar een A4 PDF-rapport inclusief speelminuten.")
 
         def build_html_report():
-            # 1. Bepaal speelminuten per speler voor de PDF
+            # Bepaal speelminuten per speler voor de PDF
             minutes_data = calculate_player_minutes(data)
             
             timeline_rows = ""
@@ -558,13 +558,12 @@ if data:
                     </tr>
                     """
 
-            # 2. Hulpfunctie om selecties op te bouwen inclusief gespeelde minuten
+            # Render van de spelerslijsten met speelminutentags
             def render_squad_pdf_list(team_key, team_name):
                 team_data = teams.get(team_key, {})
                 starters, subs = get_squad_lists(team_data)
                 all_players = starters + subs
                 
-                # Haal speelminuten dict op
                 player_mins_dict, _ = minutes_data.get(team_name, ({}, 90))
                 
                 rows_html = ""
@@ -664,7 +663,22 @@ if data:
             </body>
             </html>
             """
-        
+
+        html_doc = build_html_report()
+
+        try:
+            pdf_bytes = HTML(string=html_doc).write_pdf()
+            st.download_button(
+                label="📥 Download PDF Rapport",
+                data=pdf_bytes,
+                file_name=f"match_report_{home_team_name}_{away_team_name}.pdf",
+                use_container_width=True,
+                mime="application/pdf"
+            )
+            st.success("PDF is klaar voor download!")
+        except Exception as err:
+            st.error(f"Fout bij het genereren van PDF: {err}")
+
     # --- TAB 5: RAW YAML & BEWAREN ---
     with tab_yaml:
         st.subheader("🛠️ Ruwe YAML Data")

@@ -524,9 +524,12 @@ if data:
     # --- TAB 4: PDF GENERATION ---
     with tab_pdf:
         st.subheader("📄 Genereer PDF Rapport")
-        st.write("Exporteer de wedstrijd direct naar een A4 PDF-rapport.")
+        st.write("Exporteer de wedstrijd direct naar een A4 PDF-rapport inclusief speelminuten.")
 
         def build_html_report():
+            # 1. Bepaal speelminuten per speler voor de PDF
+            minutes_data = calculate_player_minutes(data)
+            
             timeline_rows = ""
             for e in events:
                 event_raw = e.get('event', '')
@@ -555,11 +558,31 @@ if data:
                     </tr>
                     """
 
-            home_starters, _ = get_squad_lists(teams.get('home'))
-            away_starters, _ = get_squad_lists(teams.get('away'))
+            # 2. Hulpfunctie om selecties op te bouwen inclusief gespeelde minuten
+            def render_squad_pdf_list(team_key, team_name):
+                team_data = teams.get(team_key, {})
+                starters, subs = get_squad_lists(team_data)
+                all_players = starters + subs
+                
+                # Haal speelminuten dict op
+                player_mins_dict, _ = minutes_data.get(team_name, ({}, 90))
+                
+                rows_html = ""
+                for p in all_players:
+                    p_name = p.get('name', '')
+                    p_num = f"#{p.get('number')}" if p.get('number') else ""
+                    mins = player_mins_dict.get(p_name, 0)
+                    
+                    rows_html += f"""
+                    <li style="display: flex; justify-content: space-between; align-items: center; padding: 3px 0; border-bottom: 1px solid #283548;">
+                        <span><strong style="color: #64748b; margin-right: 4px;">{p_num}</strong> {p_name}</span>
+                        <span style="color: #38bdf8; font-size: 7.5pt; font-weight: bold; background: #0f172a; padding: 1px 5px; border-radius: 4px;">{mins} min</span>
+                    </li>
+                    """
+                return rows_html
 
-            home_squad_html = "".join([f"<li>#{p.get('number', '')} {p.get('name', '')}</li>" for p in home_starters])
-            away_squad_html = "".join([f"<li>#{p.get('number', '')} {p.get('name', '')}</li>" for p in away_starters])
+            home_squad_html = render_squad_pdf_list('home', home_team_name)
+            away_squad_html = render_squad_pdf_list('away', away_team_name)
 
             return f"""
             <!DOCTYPE html>
@@ -603,7 +626,6 @@ if data:
                     margin-bottom: 8px;
                 }}
                 ul {{ list-style: none; padding: 0; margin: 0; font-size: 8.5pt; color: #cbd5e1; }}
-                li {{ padding: 2px 0; border-bottom: 1px solid #283548; }}
             </style>
             </head>
             <body>
@@ -619,7 +641,7 @@ if data:
 
             <table style="width: 100%; border-collapse: separate; border-spacing: 10px 0;">
                 <tr>
-                    <td style="width: 60%; vertical-align: top;">
+                    <td style="width: 58%; vertical-align: top;">
                         <div class="card">
                             <div class="card-title">⏱️ WEDSTRIJD VERLOOP</div>
                             <table style="width: 100%; border-collapse: collapse; font-size: 8.5pt;">
@@ -627,13 +649,13 @@ if data:
                             </table>
                         </div>
                     </td>
-                    <td style="width: 40%; vertical-align: top;">
+                    <td style="width: 42%; vertical-align: top;">
                         <div class="card">
-                            <div class="card-title">🔴 {home_team_name}</div>
+                            <div class="card-title">🔴 {home_team_name} (SPEELMINUTEN)</div>
                             <ul>{home_squad_html}</ul>
                         </div>
                         <div class="card">
-                            <div class="card-title">🟢 {away_team_name}</div>
+                            <div class="card-title">🟢 {away_team_name} (SPEELMINUTEN)</div>
                             <ul>{away_squad_html}</ul>
                         </div>
                     </td>
@@ -642,22 +664,7 @@ if data:
             </body>
             </html>
             """
-
-        html_doc = build_html_report()
-
-        try:
-            pdf_bytes = HTML(string=html_doc).write_pdf()
-            st.download_button(
-                label="📥 Download PDF Rapport",
-                data=pdf_bytes,
-                file_name=f"match_report_{home_team_name}_{away_team_name}.pdf",
-                use_container_width=True,
-                mime="application/pdf"
-            )
-            st.success("PDF is klaar voor download!")
-        except Exception as err:
-            st.error(f"Fout bij het genereren van PDF: {err}")
-
+        
     # --- TAB 5: RAW YAML & BEWAREN ---
     with tab_yaml:
         st.subheader("🛠️ Ruwe YAML Data")

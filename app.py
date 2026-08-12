@@ -56,12 +56,24 @@ def load_yaml_from_file(uploaded_file):
         st.error(f"Fout bij het lezen van het YAML-bestand: {e}")
         return None
 
+# Helper functie om veilig spelers uit te lezen ongeacht YAML-structuur (dict of list)
+def extract_roster(team_data):
+    starters = []
+    substitutes = []
+    
+    if isinstance(team_data, dict):
+        starters = team_data.get("starters", [])
+        substitutes = team_data.get("substitutes", [])
+    elif isinstance(team_data, list):
+        starters = team_data
+        
+    return starters, substitutes
+
 # -----------------------------------------------------------------------------
 # Sidebar & Routing (Admin vs Live Viewer)
 # -----------------------------------------------------------------------------
 st.sidebar.title("⚽ TLU Match Admin")
 
-# Controleer of er een 'file' parameter in de URL staat (vanuit match_app)
 query_params = st.query_params
 file_param = query_params.get("file", None)
 
@@ -69,7 +81,7 @@ data = None
 
 if file_param:
     st.sidebar.success("🔗 Live Wedstrijd Geladen")
-    base_url = "https://team-level-up.com/match-reporter/matches/"
+    base_url = "https://team-level-up.com/match-reporter/saved_matches/"
     target_url = base_url + file_param
     st.sidebar.caption(f"Bestand: `{file_param}`")
     data = load_yaml_from_url(target_url)
@@ -78,7 +90,6 @@ if file_param:
         st.query_params.clear()
         st.rerun()
 
-# Als er geen URL-parameter was of het laden faalde: Toon Desktop Admin Uploader
 if data is None:
     st.sidebar.subheader("🖥️ Desktop Admin Mode")
     uploaded_file = st.sidebar.file_uploader(
@@ -137,7 +148,7 @@ if data:
         </div>
     """, unsafe_allow_html=True)
 
-    # Top KPI Metrics voor snelle inspectie
+    # Top KPI Metrics
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
     kpi1.metric("Eindstand", f"{home_score} - {away_score}")
     kpi2.metric("Wedstrijdvorm", f"{fmt_val} v {fmt_val}")
@@ -146,7 +157,7 @@ if data:
 
     st.divider()
 
-    # Tabs voor Desktop & Mobiel overzicht
+    # Tabs
     tab_log, tab_lineup, tab_raw = st.tabs(["📋 Live Wedstrijdverloop", "👥 Opstellingen", "📄 Ruwe YAML Data"])
 
     with tab_log:
@@ -181,43 +192,41 @@ if data:
     with tab_lineup:
         col_h, col_a = st.columns(2)
         
+        # Thuisploeg
         with col_h:
             st.subheader(f"🏠 {home_team}")
-            home_data = teams_info.get("home", {})
-            st.markdown("**Basisopstelling:**")
-            starters_h = home_data.get("starters", [])
+            home_data = teams_info.get("home", {}) if isinstance(teams_info, dict) else data.get("home", [])
+            starters_h, subs_h = extract_roster(home_data)
+            
+            st.markdown("**Basisopstelling / Selectie:**")
             if starters_h:
                 for p in starters_h:
                     st.write(f"• #{p.get('number', '')} {p.get('name', '')}")
             else:
-                st.caption("Geen basisspelers opgegeven.")
+                st.caption("Geen spelers opgegeven.")
 
-            st.markdown("**Wisselspelers:**")
-            subs_h = home_data.get("substitutes", [])
             if subs_h:
+                st.markdown("**Wisselspelers:**")
                 for p in subs_h:
                     st.write(f"• #{p.get('number', '')} {p.get('name', '')}")
-            else:
-                st.caption("Geen wisselspelers opgegeven.")
 
+        # Uitploeg
         with col_a:
             st.subheader(f"🚩 {away_team}")
-            away_data = teams_info.get("away", {})
-            st.markdown("**Basisopstelling:**")
-            starters_a = away_data.get("starters", [])
+            away_data = teams_info.get("away", {}) if isinstance(teams_info, dict) else data.get("away", [])
+            starters_a, subs_a = extract_roster(away_data)
+            
+            st.markdown("**Basisopstelling / Selectie:**")
             if starters_a:
                 for p in starters_a:
                     st.write(f"• #{p.get('number', '')} {p.get('name', '')}")
             else:
-                st.caption("Geen basisspelers opgegeven.")
+                st.caption("Geen spelers opgegeven.")
 
-            st.markdown("**Wisselspelers:**")
-            subs_a = away_data.get("substitutes", [])
             if subs_a:
+                st.markdown("**Wisselspelers:**")
                 for p in subs_a:
                     st.write(f"• #{p.get('number', '')} {p.get('name', '')}")
-            else:
-                st.caption("Geen wisselspelers opgegeven.")
 
     with tab_raw:
         st.subheader("Ruwe YAML / Exporteren")
@@ -231,10 +240,9 @@ if data:
         )
 
 else:
-    # Lege status / Welkomstscherm voor Desktop Admin
     st.info("👋 Welkom bij de Match Report Creator.")
     st.markdown("""
         **Instructies:**
         * **Via Live App**: Zodra een wedstrijd wordt opgeslagen in de mobiele `match_app.html`, wordt het rapport hier automatisch geopend.
-        * **Via Desktop Admin**: Gebruik de sidebar aan de linkerkant om een eerder opgeslagen `match.yaml` bestand te uploaden en te analyseren.
+        * **Via Desktop Admin**: Gebruik de sidebar aan de linkerkant om een eerder opgeslagen `match.yaml` bestand te uploaden.
     """)

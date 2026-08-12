@@ -48,41 +48,91 @@ st.set_page_config(
     page_title="Match Report Generator",
     page_icon="⚽",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"  # Collapsed by default for mobile view
 )
 
-# Custom Styling (Dark Theme Sports Look with Readable Metric Styling)
+# Custom Responsive Mobile-First Styling
 st.markdown("""
 <style>
+    /* Global Base */
     .main {
         background-color: #0f172a;
+        padding: 0.5rem !important;
     }
+    
+    /* Responsive Scoreboard Container */
+    .scoreboard-box {
+        background: #1e293b;
+        border: 1px solid #334155;
+        border-radius: 12px;
+        padding: 15px;
+        text-align: center;
+        margin-bottom: 15px;
+    }
+    
+    .team-title-home {
+        color: #ef4444;
+        font-weight: bold;
+        font-size: clamp(1.2rem, 4vw, 2.2rem);
+    }
+    
+    .team-title-away {
+        color: #22c55e;
+        font-weight: bold;
+        font-size: clamp(1.2rem, 4vw, 2.2rem);
+    }
+    
+    .score-badge {
+        background-color: #020617;
+        color: #f59e0b;
+        font-weight: bold;
+        font-size: clamp(1.5rem, 5vw, 2.8rem);
+        padding: 4px 16px;
+        border-radius: 8px;
+        display: inline-block;
+        margin: 5px 0;
+    }
+
+    /* Metric Cards Styling (Mobile friendly grid) */
     div[data-testid="stMetric"] {
         background-color: #1e293b !important;
-        padding: 15px;
-        border-radius: 10px;
-        border: 1px solid #334155;
+        padding: 10px 12px !important;
+        border-radius: 10px !important;
+        border: 1px solid #334155 !important;
+        margin-bottom: 8px !important;
     }
+    
     div[data-testid="stMetric"] label, div[data-testid="stMetricLabel"] p {
         color: #94a3b8 !important;
         font-weight: 600 !important;
+        font-size: 0.85rem !important;
     }
+    
     div[data-testid="stMetricValue"] div {
         color: #ffffff !important;
         font-weight: bold !important;
+        font-size: 1.3rem !important;
     }
-    .event-card {
+
+    /* Event Cards on Mobile */
+    .timeline-card {
         background-color: #1e293b;
-        padding: 10px 15px;
+        padding: 10px 12px;
         border-radius: 8px;
         margin-bottom: 8px;
-        border-left: 4px solid #ef4444;
+        font-size: 0.95rem;
+        word-break: break-word;
     }
-    .squad-box {
-        background-color: #1e293b;
-        padding: 15px;
-        border-radius: 10px;
-        border: 1px solid #334155;
+
+    /* Mobile media query tweaks */
+    @media (max-width: 640px) {
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 2px;
+        }
+        .stTabs [data-baseweb="tab"] {
+            padding: 8px 10px;
+            font-size: 0.85rem;
+        }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -92,11 +142,10 @@ with st.sidebar:
     st.header("⚙️ Instellingen")
     st.write("Upload een `.yaml` wedstrijdlogboek om een dashboard en PDF-verslag te genereren.")
     st.markdown("---")
-    st.caption("Match Report Generator v1.2")
+    st.caption("Match Report Generator v1.3 (Mobile Optimized)")
 
 # 3. Main Header
 st.title("⚽ Match Report Generator")
-st.write("Genereer direct een visueel wedstrijddashboard en PDF-rapport op basis van je YAML match logs.")
 
 # 4. File Upload
 uploaded_file = st.file_uploader("Upload YAML Wedstrijdbestand", type=["yaml", "yml"])
@@ -207,7 +256,7 @@ events:
 if uploaded_file is not None:
     yaml_content = uploaded_file.getvalue().decode("utf-8")
 else:
-    st.info("💡 Tip: Upload een YAML-bestand. Een voorbeeld-wedstrijd wordt hieronder getoond.")
+    st.info("💡 Tip: Upload een YAML-bestand. Voorbeelddata wordt hieronder getoond.")
     yaml_content = sample_yaml
 
 # Parse YAML
@@ -222,45 +271,50 @@ if data:
     teams = data.get('teams', {})
     events = data.get('events', [])
 
-    home_team_name = match.get('home', 'Thuisspelend team')
-    away_team_name = match.get('away', 'Uitspelend team')
-    match_date = match.get('date', 'Onbekend')
+    home_team_name = match.get('home', 'Thuis')
+    away_team_name = match.get('away', 'Uit')
+    match_date = str(match.get('date', 'Onbekend'))
 
     # Compute score flexibly for NL / EN
     goals = [e for e in events if normalize_event(e.get('event')) == 'goal']
     home_goals = len([g for g in goals if g.get('team') == 'home'])
     away_goals = len([g for g in goals if g.get('team') == 'away'])
 
-    # Tabs structure
+    # Tabs structure (Shortened names for mobile)
     tab_dash, tab_squads, tab_pdf, tab_yaml = st.tabs([
-        "📊 Dashboard & Tijdlijn", 
-        "👥 Opstellingen", 
-        "📄 PDF Rapport Export", 
-        "🛠️ Ruwe YAML Data"
+        "📊 Dashboard", 
+        "👥 Opstelling", 
+        "📄 PDF Export", 
+        "🛠️ YAML"
     ])
 
     # --- TAB 1: DASHBOARD ---
     with tab_dash:
-        # Scoreboard
-        st.markdown("---")
-        m_col1, m_col2, m_col3 = st.columns([2, 1, 2])
-        with m_col1:
-            st.markdown(f"<h1 style='text-align: right; color: #ef4444;'>{home_team_name}</h1>", unsafe_allow_html=True)
-        with m_col2:
-            st.markdown(f"<h1 style='text-align: center; color: #f59e0b;'>{home_goals} - {away_goals}</h1>", unsafe_allow_html=True)
-            st.caption(f"<p style='text-align: center;'>{match_date}</p>", unsafe_allow_html=True)
-        with m_col3:
-            st.markdown(f"<h1 style='text-align: left; color: #22c55e;'>{away_team_name}</h1>", unsafe_allow_html=True)
-        st.markdown("---")
+        # Responsive Mobile Scoreboard Card
+        st.markdown(
+            f"""
+            <div class="scoreboard-box">
+                <div style="display: flex; justify-content: space-around; align-items: center; flex-wrap: wrap;">
+                    <div class="team-title-home">{home_team_name}</div>
+                    <div class="score-badge">{home_goals} - {away_goals}</div>
+                    <div class="team-title-away">{away_team_name}</div>
+                </div>
+                <div style="color: #64748b; font-size: 0.85rem; margin-top: 6px;">📅 {match_date}</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
 
-        # Stats Cards
-        c1, c2, c3, c4 = st.columns(4)
+        # Responsive Stats Cards (2 per row on smaller screens)
+        c1, c2 = st.columns(2)
+        c3, c4 = st.columns(2)
+
         c1.metric(f"Goals {home_team_name}", home_goals)
         c2.metric(f"Goals {away_team_name}", away_goals)
         
         home_subs = len([e for e in events if normalize_event(e.get('event')) == 'subst' and e.get('team') == 'home'])
         away_subs = len([e for e in events if normalize_event(e.get('event')) == 'subst' and e.get('team') == 'away'])
-        c3.metric(f"Wissels ({home_team_name} / {away_team_name})", f"{home_subs} / {away_subs}")
+        c3.metric("Wissels (T / U)", f"{home_subs} / {away_subs}")
         
         cards_count = len([e for e in events if normalize_event(e.get('event')) == 'card'])
         c4.metric("Kaarten", cards_count)
@@ -276,19 +330,22 @@ if data:
             extra = e.get('extra', '')
 
             badge_color = "#ef4444" if team == "home" else ("#22c55e" if team == "away" else "#94a3b8")
-            team_label = home_team_name if team == "home" else (away_team_name if team == "away" else "")
 
             if event_norm in ['start_match', 'end_p1', 'start_p2', 'end_match']:
-                st.markdown(f"**───── {time_str} | {event_raw.upper()} ─────**")
+                st.markdown(f"<div style='text-align: center; color: #64748b; font-size: 0.8rem; margin: 10px 0; font-weight: bold;'>───── {time_str} | {event_raw.upper()} ─────</div>", unsafe_allow_html=True)
             else:
-                player_str = f" - <span style='color: #cbd5e1;'>{player}</span>" if player else ""
-                extra_str = f" <span style='color: #64748b; font-size: 0.85em;'>({extra})</span>" if extra else ""
+                player_str = f" • <span style='color: #cbd5e1;'>{player}</span>" if player else ""
+                extra_str = f" <span style='color: #64748b; font-size: 0.8em;'>({extra})</span>" if extra else ""
                 st.markdown(
                     f"""
-                    <div style="background-color: #1e293b; padding: 10px; border-radius: 6px; margin-bottom: 6px; border-left: 5px solid {badge_color};">
-                        <span style="color: #94a3b8; font-weight: bold; margin-right: 15px;">{time_str}</span>
-                        <span style="font-size: 1.1em; margin-right: 10px;">{icon}</span>
-                        <strong style="color: white;">{event_raw}</strong>{player_str}{extra_str}
+                    <div style="background-color: #1e293b; padding: 10px 12px; border-radius: 8px; margin-bottom: 6px; border-left: 5px solid {badge_color};">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+                            <span style="color: #94a3b8; font-weight: bold; font-size: 0.8rem;">{time_str}</span>
+                            <span style="font-size: 1rem;">{icon}</span>
+                        </div>
+                        <div>
+                            <strong style="color: white;">{event_raw}</strong>{player_str}{extra_str}
+                        </div>
                     </div>
                     """, 
                     unsafe_allow_html=True
@@ -299,7 +356,7 @@ if data:
         col_home, col_away = st.columns(2)
 
         with col_home:
-            st.subheader(f"🔴 {home_team_name} (Thuis)")
+            st.subheader(f"🔴 {home_team_name}")
             starters, subs = get_squad_lists(teams.get('home'))
 
             st.markdown("**Basisopstelling:**")
@@ -312,7 +369,7 @@ if data:
                     st.text(f"#{p.get('number', '')} - {p.get('name', '')}")
 
         with col_away:
-            st.subheader(f"🟢 {away_team_name} (Uit)")
+            st.subheader(f"🟢 {away_team_name}")
             starters, subs = get_squad_lists(teams.get('away'))
 
             st.markdown("**Basisopstelling:**")
@@ -327,7 +384,7 @@ if data:
     # --- TAB 3: PDF GENERATION ---
     with tab_pdf:
         st.subheader("📄 Genereer PDF Rapport")
-        st.write("Klik op onderstaande knop om het PDF-rapport op te bouwen en te downloaden.")
+        st.write("Exporteer de wedstrijd direct naar een A4 PDF-rapport.")
 
         def build_html_report():
             timeline_rows = ""
@@ -454,13 +511,14 @@ if data:
                 label="📥 Download PDF Rapport",
                 data=pdf_bytes,
                 file_name=f"match_report_{home_team_name}_{away_team_name}.pdf",
+                use_container_width=True,
                 mime="application/pdf"
             )
-            st.success("PDF is succesvol gegenereerd en klaar voor download!")
+            st.success("PDF is klaar voor download!")
         except Exception as err:
             st.error(f"Fout bij het genereren van PDF: {err}")
 
     # --- TAB 4: RAW YAML ---
     with tab_yaml:
-        st.subheader("🛠️ Ruwe YAML Inhoud")
+        st.subheader("🛠️ Ruwe YAML")
         st.code(yaml_content, language="yaml")

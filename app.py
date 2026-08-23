@@ -21,7 +21,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom Styling voor Clean Match Header
 st.markdown("""
     <style>
     .score-banner {
@@ -46,9 +45,99 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
+# Logica voor Minutenberekening
+# -----------------------------------------------------------------------------
+def parse_time_to_minutes(time_str):
+    """Zet tijdnotaties zoals '27:38' of '45' om naar een float getal in minuten."""
+    try:
+        if ":" in str(time_str):
+            parts = str(time_str).split(":")
+            return float(parts[0]) + float(parts[1]) / 60.0
+        return float(time_str)
+    except Exception:
+        return 0.0
+
+def calculate_player_minutes(starters_h, subs_h, starters_a, subs_a, events_info, total_match_minutes):
+    """
+    Berekent het aantal gespeelde minuten per speler op basis van startopstelling en wissels.
+    Retourneert een gesorteerde lijst van dicts.
+    """
+    players = {}
+
+    def init_player(p, team_key, is_starter):
+        name = p.get('name', 'Onbekend')
+        num = p.get('number', '')
+        key = f"{team_key}_{name}"
+        players[key] = {
+            'name': name,
+            'number': num,
+            'team': team_key,
+            'on_field': is_starter,
+            'last_in': 0.0 if is_starter else None,
+            'total_minutes': 0.0
+        }
+
+    for p in starters_h: init_player(p, 'home', True)
+    for p in subs_h: init_player(p, 'home', False)
+    for p in starters_a: init_player(p, 'away', True)
+    for p in subs_a: init_player(p, 'away', False)
+
+    for ev in events_info:
+        if ev.get('marker'):
+            continue
+        
+        ev_name = str(ev.get('event', ''))
+        ev_icon = str(ev.get('icon', ''))
+        
+        if "Wissel" in ev_name or "🔄" in ev_icon:
+            t_min = parse_time_to_minutes(ev.get('time', 0))
+            team = ev.get('team', '')
+            
+            # Formaat 'Speler Uit -> Speler In' of via extra veld
+            player_info = ev.get('player', '')
+            extra = ev.get('extra', '')
+            
+            p_out_name = None
+            p_in_name = None
+
+            if "->" in player_info:
+                parts = player_info.split("->")
+                p_out_name = parts[0].strip()
+                p_in_name = parts[1].strip()
+            elif "->" in extra:
+                parts = extra.split("->")
+                p_out_name = parts[0].strip()
+                p_in_name = parts[1].strip()
+
+            # Verwerk speler eruit
+            if p_out_name:
+                key_out = f"{team}_{p_out_name}"
+                if key_out in players and players[key_out]['on_field']:
+                    players[key_out]['total_minutes'] += (t_min - players[key_out]['last_in'])
+                    players[key_out]['on_field'] = False
+
+            # Verwerk speler erin
+            if p_in_name:
+                key_in = f"{team}_{p_in_name}"
+                if key_in in players and not players[key_in]['on_field']:
+                    players[key_in]['on_field'] = True
+                    players[key_in]['last_in'] = t_min
+
+    # Eindtijd berekenen voor alle spelers die aan het einde nog op het veld stonden
+    for key, pdata in players.items():
+        if pdata['on_field']:
+            pdata['total_minutes'] += (total_match_minutes - pdata['last_in'])
+        pdata['total_minutes'] = round(pdata['total_minutes'])
+
+    # Converteren naar lijst en sorteren van hoog naar laag
+    result = list(players.values())
+    result.sort(key=lambda x: x['total_minutes'], reverse=True)
+    return result
+
+# -----------------------------------------------------------------------------
 # PDF Generator
 # -----------------------------------------------------------------------------
-def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, starters_a, subs_a, events_info):
+def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, starters_a, subs_a, events_info, minutes_list):
     home_team = match_info.get("home", "Thuisploeg")
     away_team = match_info.get("away", "Uitploeg")
     match_date = match_info.get("date", "Onbekend")
@@ -56,7 +145,6 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
     fmt_val = match_info.get("format", 11)
     half_duration = match_info.get("half_duration", 45)
 
-    # Twemoji SVG icon URLs met Strikte inline dimensions en afstands-margins
     ICON_HOME = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f3e0.svg" class="icon-sm">'
     ICON_AWAY = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f6a9.svg" class="icon-sm">'
     ICON_LINEUP = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f465.svg" class="icon-md">'
@@ -64,6 +152,7 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
     ICON_TIMER = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/23f1.svg" class="icon-sm">'
     ICON_BALL = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/26bd.svg" class="icon-sm">'
     ICON_SUB = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f504.svg" class="icon-sm">'
+    ICON_STATS = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f4ca.svg" class="icon-md">'
 
     events_html = ""
     for ev in events_info:
@@ -77,7 +166,6 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
             ev_name = ev.get('event', '')
             ev_icon = ev.get('icon', '')
 
-            # Bepaal het icoon dynamisch op basis van de gebeurtenis
             if "⚽" in ev_icon or "Goal" in ev_name or "Doelpunt" in ev_name:
                 icon_html = ICON_BALL
             elif "🔄" in ev_icon or "Wissel" in ev_name:
@@ -101,95 +189,43 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
             return "<i>Geen spelers opgegeven</i>"
         return "<br>".join([f"#{p.get('number', '')} {p.get('name', '')}" for p in players])
 
+    # HTML opbouw gespeelde minuten tabel
+    minutes_html = ""
+    for p in minutes_list:
+        t_label = home_team if p['team'] == 'home' else away_team
+        minutes_html += f"""
+        <tr>
+            <td>#{p['number']}</td>
+            <td><b>{p['name']}</b></td>
+            <td>{t_label}</td>
+            <td><b>{int(p['total_minutes'])} min</b></td>
+        </tr>
+        """
+
     html_content = f"""
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset="utf-8">
         <style>
-            @page {{
-                size: A4;
-                margin: 15mm;
-            }}
-            body {{ 
-                font-family: 'Helvetica', 'Arial', sans-serif; 
-                color: #333; 
-                margin: 0;
-                padding: 0;
-            }}
-            img {{
-                max-width: 100%;
-            }}
-            .icon-sm {{
-                width: 14px !important;
-                height: 14px !important;
-                vertical-align: -2px;
-                display: inline-block;
-                margin-right: 6px !important;
-            }}
-            .icon-md {{
-                width: 18px !important;
-                height: 18px !important;
-                vertical-align: -3px;
-                display: inline-block;
-                margin-right: 8px !important;
-            }}
-            .header {{ 
-                text-align: center; 
-                background-color: #1e1e2e; 
-                color: #fff; 
-                padding: 15px; 
-                border-radius: 8px; 
-            }}
+            @page {{ size: A4; margin: 15mm; }}
+            body {{ font-family: 'Helvetica', 'Arial', sans-serif; color: #333; margin: 0; padding: 0; }}
+            img {{ max-width: 100%; }}
+            .icon-sm {{ width: 14px !important; height: 14px !important; vertical-align: -2px; display: inline-block; margin-right: 6px !important; }}
+            .icon-md {{ width: 18px !important; height: 18px !important; vertical-align: -3px; display: inline-block; margin-right: 8px !important; }}
+            .header {{ text-align: center; background-color: #1e1e2e; color: #fff; padding: 15px; border-radius: 8px; }}
             .score {{ font-size: 26px; font-weight: bold; margin: 5px 0; }}
             .sub-info {{ font-size: 12px; color: #ccc; }}
             
-            .section-title {{ 
-                font-size: 16px; 
-                font-weight: bold; 
-                border-bottom: 2px solid #2980b9; 
-                margin-top: 20px; 
-                padding-bottom: 5px; 
-                color: #2d2d3f; 
-            }}
+            .section-title {{ font-size: 16px; font-weight: bold; border-bottom: 2px solid #2980b9; margin-top: 20px; padding-bottom: 5px; color: #2d2d3f; }}
             
-            .teams-table {{ 
-                width: 100%; 
-                margin-top: 10px; 
-                border-collapse: separate;
-                border-spacing: 10px 0;
-            }}
-            .team-box {{ 
-                width: 50%; 
-                vertical-align: top;
-                background: #f8f9fa; 
-                padding: 12px; 
-                border-radius: 6px; 
-                border: 1px solid #ddd; 
-                font-size: 12px;
-            }}
-            .team-box h3 {{ 
-                margin-top: 0; 
-                margin-bottom: 8px;
-                color: #2980b9; 
-                font-size: 14px;
-            }}
+            .teams-table {{ width: 100%; margin-top: 10px; border-collapse: separate; border-spacing: 10px 0; }}
+            .team-box {{ width: 50%; vertical-align: top; background: #f8f9fa; padding: 12px; border-radius: 6px; border: 1px solid #ddd; font-size: 12px; }}
+            .team-box h3 {{ margin-top: 0; margin-bottom: 8px; color: #2980b9; font-size: 14px; }}
             
-            table.events-table {{ 
-                width: 100%; 
-                border-collapse: collapse; 
-                margin-top: 10px; 
-                font-size: 11px; 
-            }}
-            table.events-table th, table.events-table td {{ 
-                border: 1px solid #ddd; 
-                padding: 6px 8px; 
-                text-align: left; 
-            }}
-            table.events-table th {{ 
-                background-color: #2d2d3f; 
-                color: white; 
-            }}
+            table.data-table {{ width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 11px; }}
+            table.data-table th, table.data-table td {{ border: 1px solid #ddd; padding: 6px 8px; text-align: left; }}
+            table.data-table th {{ background-color: #2d2d3f; color: white; }}
             .marker-row {{ background-color: #eaeded; text-align: center; }}
             .footer {{ margin-top: 25px; text-align: center; font-size: 10px; color: #888; }}
         </style>
@@ -217,7 +253,7 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
         </table>
 
         <div class="section-title">{ICON_LOG}Wedstrijdverloop</div>
-        <table class="events-table">
+        <table class="data-table">
             <thead>
                 <tr>
                     <th width="15%">Tijd</th>
@@ -228,6 +264,21 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
             </thead>
             <tbody>
                 {events_html}
+            </tbody>
+        </table>
+
+        <div class="section-title">{ICON_STATS}Totaal Gespeelde Minuten per Speler</div>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th width="10%">#</th>
+                    <th width="40%">Speler</th>
+                    <th width="30%">Team</th>
+                    <th width="20%">Gespeelde Minuten</th>
+                </tr>
+            </thead>
+            <tbody>
+                {minutes_html}
             </tbody>
         </table>
 
@@ -264,13 +315,11 @@ def load_yaml_from_file(uploaded_file):
 def extract_roster(team_data):
     starters = []
     substitutes = []
-    
     if isinstance(team_data, dict):
         starters = team_data.get("starters", [])
         substitutes = team_data.get("substitutes", [])
     elif isinstance(team_data, list):
         starters = team_data
-        
     return starters, substitutes
 
 # -----------------------------------------------------------------------------
@@ -280,7 +329,6 @@ st.sidebar.title("⚽ TLU Match Admin")
 
 query_params = st.query_params
 file_param = query_params.get("file", None)
-
 data = None
 
 if file_param:
@@ -318,6 +366,7 @@ if data:
     category = match_info.get("category", "B")
     fmt_val = match_info.get("format", 11)
     half_duration = match_info.get("half_duration", 45)
+    total_match_minutes = half_duration * 2
 
     # Spelers ophalen
     home_data = teams_info.get("home", {}) if isinstance(teams_info, dict) else data.get("home", [])
@@ -326,10 +375,9 @@ if data:
     away_data = teams_info.get("away", {}) if isinstance(teams_info, dict) else data.get("away", [])
     starters_a, subs_a = extract_roster(away_data)
 
-    # Bereken de uitslag dynamisch op basis van de gelogde events
+    # Berekening uitslag
     home_score = 0
     away_score = 0
-    
     for ev in events_info:
         name = ev.get("event", "")
         team = ev.get("team", "")
@@ -351,6 +399,9 @@ if data:
                 if team == "home": home_score += 1
                 elif team == "away": away_score += 1
 
+    # Bereken speelminuten gesorteerd van hoog naar laag
+    minutes_list = calculate_player_minutes(starters_h, subs_h, starters_a, subs_a, events_info, total_match_minutes)
+
     # Header Banner
     st.markdown(f"""
         <div class="score-banner">
@@ -369,11 +420,10 @@ if data:
     st.divider()
 
     # Genereer PDF data
-    pdf_file_data = generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, starters_a, subs_a, events_info)
+    pdf_file_data = generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, starters_a, subs_a, events_info, minutes_list)
     mime_type = "application/pdf" if WEASYPRINT_AVAILABLE else "text/html"
     file_ext = "pdf" if WEASYPRINT_AVAILABLE else "html"
 
-    # PDF DownloadKnop in Sidebar
     st.sidebar.markdown("---")
     st.sidebar.download_button(
         label=f"📄 Download Wedstrijdrapport ({file_ext.upper()})",
@@ -384,7 +434,7 @@ if data:
     )
 
     # Tabs
-    tab_log, tab_lineup, tab_raw = st.tabs(["📋 Live Wedstrijdverloop", "👥 Opstellingen", "📄 Ruwe Data & Export"])
+    tab_log, tab_lineup, tab_stats, tab_raw = st.tabs(["📋 Live Wedstrijdverloop", "👥 Opstellingen", "📊 Speelminuten", "📄 Ruwe Data & Export"])
 
     with tab_log:
         st.subheader("Wedstrijdverloop & Gebeurtenissen")
@@ -417,8 +467,6 @@ if data:
 
     with tab_lineup:
         col_h, col_a = st.columns(2)
-        
-        # Thuisploeg
         with col_h:
             st.subheader(f"🏠 {home_team}")
             st.markdown("**Basisopstelling / Selectie:**")
@@ -433,7 +481,6 @@ if data:
                 for p in subs_h:
                     st.write(f"• #{p.get('number', '')} {p.get('name', '')}")
 
-        # Uitploeg
         with col_a:
             st.subheader(f"🚩 {away_team}")
             st.markdown("**Basisopstelling / Selectie:**")
@@ -448,9 +495,21 @@ if data:
                 for p in subs_a:
                     st.write(f"• #{p.get('number', '')} {p.get('name', '')}")
 
+    with tab_stats:
+        st.subheader("Totaal Gespeelde Minuten per Speler")
+        df_minutes = pd.DataFrame([
+            {
+                "Rugnummer": p['number'],
+                "Speler": p['name'],
+                "Team": home_team if p['team'] == 'home' else away_team,
+                "Gespeelde Minuten": f"{int(p['total_minutes'])} min"
+            }
+            for p in minutes_list
+        ])
+        st.dataframe(df_minutes, use_container_width=True, hide_index=True)
+
     with tab_raw:
         st.subheader("Exporteer Opties")
-        
         col_exp1, col_exp2 = st.columns(2)
         with col_exp1:
             st.download_button(
@@ -460,7 +519,6 @@ if data:
                 mime=mime_type,
                 use_container_width=True
             )
-            
         with col_exp2:
             yaml_string = yaml.dump(data, default_flow_style=False, allow_unicode=True)
             st.download_button(
@@ -477,8 +535,3 @@ if data:
 
 else:
     st.info("👋 Welkom bij de Match Report Creator.")
-    st.markdown("""
-        **Instructies:**
-        * **Via Live App**: Zodra een wedstrijd wordt opgeslagen in de mobiele `match_app.html`, wordt het rapport hier automatisch geopend.
-        * **Via Desktop Admin**: Gebruik de sidebar aan de linkerkant om een eerder opgeslagen `match.yaml` bestand te uploaden.
-    """)

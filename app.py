@@ -3,6 +3,7 @@ import yaml
 import requests
 import pandas as pd
 import io
+import re
 
 # Optionele import van WeasyPrint voor PDF-generatie
 try:
@@ -47,32 +48,55 @@ st.markdown("""
 # -----------------------------------------------------------------------------
 # Logica voor Minutenberekening
 # -----------------------------------------------------------------------------
-def parse_time_to_minutes(time_str):
-    """Zet tijdnotaties zoals '27:38' of '45' om naar een float getal in minuten."""
+def parse_time_to_minutes(time_str, half_duration=45):
+    """
+    Zet tijden zoals 'P1 | 24:57' om naar 24.95
+    en 'P2 | 13:51' naar 45 + 13.85 = 58.85
+    """
     try:
-        if ":" in str(time_str):
-            parts = str(time_str).split(":")
-            return float(parts[0]) + float(parts[1]) / 60.0
-        return float(time_str)
+        s = str(time_str).strip()
+        period_offset = 0.0
+
+        if "P2" in s:
+            period_offset = float(half_duration)
+            s = s.replace("P2", "").replace("|", "").strip()
+        elif "P1" in s:
+            s = s.replace("P1", "").replace("|", "").strip()
+
+        # Afhandelen van eventuele blessuretijd notaties (bijv. 45:00+00:17)
+        if "+" in s:
+            s = s.split("+")[0]
+
+        if ":" in s:
+            parts = s.split(":")
+            mins = float(parts[0]) + float(parts[1]) / 60.0
+        else:
+            mins = float(s)
+
+        return period_offset + mins
     except Exception:
         return 0.0
 
-def calculate_player_minutes(starters_h, subs_h, starters_a, subs_a, events_info, total_match_minutes):
-    """
-    Berekent het aantal gespeelde minuten per speler op basis van startopstelling en wissels.
-    Flexibel ingesteld op naam-matching om te voorkomen dat spelers op 0 minuten blijven staan.
-    """
+def clean_player_name(raw_name):
+    """Verwijdert eventuele nummers vóór de naam."""
+    if not raw_name:
+        return ""
+    return re.sub(r'^\d+[\.\s\-]+', '', str(raw_name)).strip()
+
+def calculate_player_minutes(starters_h, subs_h, starters_a, subs_a, events_info, total_match_minutes, half_duration):
     players = {}
 
     def add_player(p, team_key, is_starter):
-        name = str(p.get('name', '')).strip()
-        if not name:
+        raw_name = str(p.get('name', '')).strip()
+        c_name = clean_player_name(raw_name)
+        if not c_name:
             return
+        
         num = p.get('number', '')
-        # Unieke sleutel op basis van team en genormaliseerde naam
-        key = f"{team_key}_{name.lower()}"
+        key = f"{team_key}_{c_name.lower()}"
+        
         players[key] = {
-            'name': name,
+            'clean_name': c_name,
             'number': num,
             'team': team_key,
             'on_field': is_starter,
@@ -80,22 +104,25 @@ def calculate_player_minutes(starters_h, subs_h, starters_a, subs_a, events_info
             'total_minutes': 0.0
         }
 
-    for p in starters_h: add_player(p, 'home', True)
-    for p in subs_h: add_player(p, 'home', False)
-    for p in starters_a: add_player(p, 'away', True)
-    for p in subs_a: add_player(p, 'away', False)
+    for p in (starters_h or []): add_player(p, 'home', True)
+    for p in (subs_h or []): add_player(p, 'home', False)
+    for p in (starters_a or []): add_player(p, 'away', True)
+    for p in (subs_a or []): add_player(p, 'away', False)
 
-    def find_player_key(team_key, search_name):
-        """Zoekt naar de best passende speler in het team."""
-        s_clean = search_name.lower().strip()
-        # Directe match
+    def find_player_key(team_key, search_text):
+        s_clean = clean_player_name(search_text).lower()
+        if not s_clean:
+            return None
+        
         exact_key = f"{team_key}_{s_clean}"
         if exact_key in players:
             return exact_key
-        # Deeltijd match (bijv. voor- of achternaam)
+        
         for k, pdata in players.items():
-            if pdata['team'] == team_key and (s_clean in k or k.replace(f"{team_key}_", "") in s_clean):
-                return k
+            if pdata['team'] == team_key:
+                p_clean = pdata['clean_name'].lower()
+                if s_clean in p_clean or p_clean in s_clean:
+                    return k
         return None
 
     for ev in events_info:
@@ -106,46 +133,44 @@ def calculate_player_minutes(starters_h, subs_h, starters_a, subs_a, events_info
         ev_icon = str(ev.get('icon', ''))
         
         if "Wissel" in ev_name or "🔄" in ev_icon:
-            t_min = parse_time_to_minutes(ev.get('time', 0))
+            t_min = parse_time_to_minutes(ev.get('time', 0), half_duration)
             team = ev.get('team', '')
             
-            player_info = str(ev.get('player', ''))
-            extra_info = str(ev.get('extra', ''))
-            combined = f"{player_info} {extra_info}"
-            
             p_out_name, p_in_name = None, None
+            extra_val = str(ev.get('extra', ''))
+            player_val = str(ev.get('player', ''))
 
-            # Ondersteun 'Speler Uit -> Speler In' of 'Speler In -> Speler Uit'
-            if "->" in combined:
-                parts = combined.split("->")
+            # Verwerk 'In: Marit | Out: Riva'
+            if "In:" in extra_val and "Out:" in extra_val:
+                m_in = re.search(r'In:\s*([^\|]+)', extra_val)
+                m_out = re.search(r'Out:\s*([^\|]+)', extra_val)
+                if m_in: p_in_name = m_in.group(1).strip()
+                if m_out: p_out_name = m_out.group(1).strip()
+            elif "->" in player_val:
+                parts = player_val.split("->")
                 p_out_name = parts[0].strip()
                 p_in_name = parts[1].strip()
-            elif "in voor" in combined.lower():
-                parts = combined.lower().split("in voor")
-                p_in_name = parts[0].strip()
-                p_out_name = parts[1].strip()
 
-            # Verwerk speler die het veld verlaat
+            # Verwerk speler uit
             if p_out_name:
                 key_out = find_player_key(team, p_out_name)
                 if key_out and players[key_out]['on_field']:
                     players[key_out]['total_minutes'] += (t_min - players[key_out]['last_in'])
                     players[key_out]['on_field'] = False
 
-            # Verwerk speler die het veld betreedt
+            # Verwerk speler in
             if p_in_name:
                 key_in = find_player_key(team, p_in_name)
                 if key_in:
                     players[key_in]['on_field'] = True
                     players[key_in]['last_in'] = t_min
 
-    # Bereken de overgebleven speelminuten tot het eindsignaal voor wie nog op het veld staat
+    # Bereken minuten voor wie op het einde nog op het veld stond
     for key, pdata in players.items():
         if pdata['on_field'] and pdata['last_in'] is not None:
             players[key]['total_minutes'] += (total_match_minutes - pdata['last_in'])
         players[key]['total_minutes'] = round(players[key]['total_minutes'])
 
-    # Sorteer resultaten van hoog naar laag
     result = list(players.values())
     result.sort(key=lambda x: x['total_minutes'], reverse=True)
     return result
@@ -205,14 +230,13 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
             return "<i>Geen spelers opgegeven</i>"
         return "<br>".join([f"#{p.get('number', '')} {p.get('name', '')}" for p in players])
 
-    # HTML opbouw gespeelde minuten tabel
     minutes_html = ""
     for p in minutes_list:
         t_label = home_team if p['team'] == 'home' else away_team
         minutes_html += f"""
         <tr>
             <td>#{p['number']}</td>
-            <td><b>{p['name']}</b></td>
+            <td><b>{p['clean_name']}</b></td>
             <td>{t_label}</td>
             <td><b>{int(p['total_minutes'])} min</b></td>
         </tr>
@@ -232,13 +256,10 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
             .header {{ text-align: center; background-color: #1e1e2e; color: #fff; padding: 15px; border-radius: 8px; }}
             .score {{ font-size: 26px; font-weight: bold; margin: 5px 0; }}
             .sub-info {{ font-size: 12px; color: #ccc; }}
-            
             .section-title {{ font-size: 16px; font-weight: bold; border-bottom: 2px solid #2980b9; margin-top: 20px; padding-bottom: 5px; color: #2d2d3f; }}
-            
             .teams-table {{ width: 100%; margin-top: 10px; border-collapse: separate; border-spacing: 10px 0; }}
             .team-box {{ width: 50%; vertical-align: top; background: #f8f9fa; padding: 12px; border-radius: 6px; border: 1px solid #ddd; font-size: 12px; }}
             .team-box h3 {{ margin-top: 0; margin-bottom: 8px; color: #2980b9; font-size: 14px; }}
-            
             table.data-table {{ width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 11px; }}
             table.data-table th, table.data-table td {{ border: 1px solid #ddd; padding: 6px 8px; text-align: left; }}
             table.data-table th {{ background-color: #2d2d3f; color: white; }}
@@ -384,14 +405,12 @@ if data:
     half_duration = match_info.get("half_duration", 45)
     total_match_minutes = half_duration * 2
 
-    # Spelers ophalen
     home_data = teams_info.get("home", {}) if isinstance(teams_info, dict) else data.get("home", [])
     starters_h, subs_h = extract_roster(home_data)
 
     away_data = teams_info.get("away", {}) if isinstance(teams_info, dict) else data.get("away", [])
     starters_a, subs_a = extract_roster(away_data)
 
-    # Berekening uitslag
     home_score = 0
     away_score = 0
     for ev in events_info:
@@ -415,10 +434,8 @@ if data:
                 if team == "home": home_score += 1
                 elif team == "away": away_score += 1
 
-    # Bereken speelminuten gesorteerd van hoog naar laag
-    minutes_list = calculate_player_minutes(starters_h, subs_h, starters_a, subs_a, events_info, total_match_minutes)
+    minutes_list = calculate_player_minutes(starters_h, subs_h, starters_a, subs_a, events_info, total_match_minutes, half_duration)
 
-    # Header Banner
     st.markdown(f"""
         <div class="score-banner">
             <div class="score-title">{home_team} &nbsp; {home_score} - {away_score} &nbsp; {away_team}</div>
@@ -426,7 +443,6 @@ if data:
         </div>
     """, unsafe_allow_html=True)
 
-    # Top KPI Metrics
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
     kpi1.metric("Eindstand", f"{home_score} - {away_score}")
     kpi2.metric("Wedstrijdvorm", f"{fmt_val} v {fmt_val}")
@@ -435,7 +451,6 @@ if data:
 
     st.divider()
 
-    # Genereer PDF data
     pdf_file_data = generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, starters_a, subs_a, events_info, minutes_list)
     mime_type = "application/pdf" if WEASYPRINT_AVAILABLE else "text/html"
     file_ext = "pdf" if WEASYPRINT_AVAILABLE else "html"
@@ -449,7 +464,6 @@ if data:
         use_container_width=True
     )
 
-    # Tabs
     tab_log, tab_lineup, tab_stats, tab_raw = st.tabs(["📋 Live Wedstrijdverloop", "👥 Opstellingen", "📊 Speelminuten", "📄 Ruwe Data & Export"])
 
     with tab_log:
@@ -516,7 +530,7 @@ if data:
         df_minutes = pd.DataFrame([
             {
                 "Rugnummer": p['number'],
-                "Speler": p['name'],
+                "Speler": p['clean_name'],
                 "Team": home_team if p['team'] == 'home' else away_team,
                 "Gespeelde Minuten": f"{int(p['total_minutes'])} min"
             }

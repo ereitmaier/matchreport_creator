@@ -60,14 +60,17 @@ def parse_time_to_minutes(time_str):
 def calculate_player_minutes(starters_h, subs_h, starters_a, subs_a, events_info, total_match_minutes):
     """
     Berekent het aantal gespeelde minuten per speler op basis van startopstelling en wissels.
-    Retourneert een gesorteerde lijst van dicts.
+    Flexibel ingesteld op naam-matching om te voorkomen dat spelers op 0 minuten blijven staan.
     """
     players = {}
 
-    def init_player(p, team_key, is_starter):
-        name = p.get('name', 'Onbekend')
+    def add_player(p, team_key, is_starter):
+        name = str(p.get('name', '')).strip()
+        if not name:
+            return
         num = p.get('number', '')
-        key = f"{team_key}_{name}"
+        # Unieke sleutel op basis van team en genormaliseerde naam
+        key = f"{team_key}_{name.lower()}"
         players[key] = {
             'name': name,
             'number': num,
@@ -77,10 +80,23 @@ def calculate_player_minutes(starters_h, subs_h, starters_a, subs_a, events_info
             'total_minutes': 0.0
         }
 
-    for p in starters_h: init_player(p, 'home', True)
-    for p in subs_h: init_player(p, 'home', False)
-    for p in starters_a: init_player(p, 'away', True)
-    for p in subs_a: init_player(p, 'away', False)
+    for p in starters_h: add_player(p, 'home', True)
+    for p in subs_h: add_player(p, 'home', False)
+    for p in starters_a: add_player(p, 'away', True)
+    for p in subs_a: add_player(p, 'away', False)
+
+    def find_player_key(team_key, search_name):
+        """Zoekt naar de best passende speler in het team."""
+        s_clean = search_name.lower().strip()
+        # Directe match
+        exact_key = f"{team_key}_{s_clean}"
+        if exact_key in players:
+            return exact_key
+        # Deeltijd match (bijv. voor- of achternaam)
+        for k, pdata in players.items():
+            if pdata['team'] == team_key and (s_clean in k or k.replace(f"{team_key}_", "") in s_clean):
+                return k
+        return None
 
     for ev in events_info:
         if ev.get('marker'):
@@ -93,43 +109,43 @@ def calculate_player_minutes(starters_h, subs_h, starters_a, subs_a, events_info
             t_min = parse_time_to_minutes(ev.get('time', 0))
             team = ev.get('team', '')
             
-            # Formaat 'Speler Uit -> Speler In' of via extra veld
-            player_info = ev.get('player', '')
-            extra = ev.get('extra', '')
+            player_info = str(ev.get('player', ''))
+            extra_info = str(ev.get('extra', ''))
+            combined = f"{player_info} {extra_info}"
             
-            p_out_name = None
-            p_in_name = None
+            p_out_name, p_in_name = None, None
 
-            if "->" in player_info:
-                parts = player_info.split("->")
+            # Ondersteun 'Speler Uit -> Speler In' of 'Speler In -> Speler Uit'
+            if "->" in combined:
+                parts = combined.split("->")
                 p_out_name = parts[0].strip()
                 p_in_name = parts[1].strip()
-            elif "->" in extra:
-                parts = extra.split("->")
-                p_out_name = parts[0].strip()
-                p_in_name = parts[1].strip()
+            elif "in voor" in combined.lower():
+                parts = combined.lower().split("in voor")
+                p_in_name = parts[0].strip()
+                p_out_name = parts[1].strip()
 
-            # Verwerk speler eruit
+            # Verwerk speler die het veld verlaat
             if p_out_name:
-                key_out = f"{team}_{p_out_name}"
-                if key_out in players and players[key_out]['on_field']:
+                key_out = find_player_key(team, p_out_name)
+                if key_out and players[key_out]['on_field']:
                     players[key_out]['total_minutes'] += (t_min - players[key_out]['last_in'])
                     players[key_out]['on_field'] = False
 
-            # Verwerk speler erin
+            # Verwerk speler die het veld betreedt
             if p_in_name:
-                key_in = f"{team}_{p_in_name}"
-                if key_in in players and not players[key_in]['on_field']:
+                key_in = find_player_key(team, p_in_name)
+                if key_in:
                     players[key_in]['on_field'] = True
                     players[key_in]['last_in'] = t_min
 
-    # Eindtijd berekenen voor alle spelers die aan het einde nog op het veld stonden
+    # Bereken de overgebleven speelminuten tot het eindsignaal voor wie nog op het veld staat
     for key, pdata in players.items():
-        if pdata['on_field']:
-            pdata['total_minutes'] += (total_match_minutes - pdata['last_in'])
-        pdata['total_minutes'] = round(pdata['total_minutes'])
+        if pdata['on_field'] and pdata['last_in'] is not None:
+            players[key]['total_minutes'] += (total_match_minutes - pdata['last_in'])
+        players[key]['total_minutes'] = round(players[key]['total_minutes'])
 
-    # Converteren naar lijst en sorteren van hoog naar laag
+    # Sorteer resultaten van hoog naar laag
     result = list(players.values())
     result.sort(key=lambda x: x['total_minutes'], reverse=True)
     return result

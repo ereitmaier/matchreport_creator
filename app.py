@@ -56,18 +56,33 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
     fmt_val = match_info.get("format", 11)
     half_duration = match_info.get("half_duration", 45)
 
+    # Twemoji SVG icon URLs (gegarandeerde rendering in WeasyPrint PDF)
+    ICON_HOME = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f3e0.svg" width="16" height="16" style="vertical-align: middle; margin-right: 4px;">'
+    ICON_AWAY = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f6a9.svg" width="16" height="16" style="vertical-align: middle; margin-right: 4px;">'
+    ICON_LINEUP = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f465.svg" width="18" height="18" style="vertical-align: middle; margin-right: 6px;">'
+    ICON_LOG = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f4cb.svg" width="18" height="18" style="vertical-align: middle; margin-right: 6px;">'
+    ICON_TIMER = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/23f1.svg" width="14" height="14" style="vertical-align: middle; margin-right: 4px;">'
+    ICON_BALL = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/26bd.svg" width="14" height="14" style="vertical-align: middle; margin-right: 4px;">'
+
     events_html = ""
     for ev in events_info:
         t_str = ev.get("time", "")
         if ev.get("marker"):
-            events_html += f"<tr class='marker-row'><td colspan='4'><b>⏱️ {ev.get('event', '')}</b> ({ev.get('extra', '')})</td></tr>"
+            events_html += f"<tr class='marker-row'><td colspan='4'><b>{ICON_TIMER} {ev.get('event', '')}</b> ({ev.get('extra', '')})</td></tr>"
         else:
             team_name = home_team if ev.get("team") == "home" else (away_team if ev.get("team") == "away" else "-")
             og = " (Eigen Doelpunt)" if ev.get("own_goal") else ""
+            
+            ev_icon = ev.get('icon', '')
+            if "⚽" in ev_icon or "Goal" in ev.get('event', '') or "Doelpunt" in ev.get('event', ''):
+                icon_html = ICON_BALL
+            else:
+                icon_html = f"{ev_icon} " if ev_icon else ""
+
             events_html += f"""
             <tr>
                 <td><b>{t_str}</b></td>
-                <td>{ev.get('icon', '')} {ev.get('event', '')}{og}</td>
+                <td>{icon_html}{ev.get('event', '')}{og}</td>
                 <td>{team_name}</td>
                 <td>{ev.get('player', '-')} {f"({ev.get('extra')})" if ev.get('extra') else ''}</td>
             </tr>
@@ -84,13 +99,7 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
     <head>
         <meta charset="utf-8">
         <style>
-            @import url('https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap');
-            
-            body {{ 
-                font-family: 'Helvetica', 'Arial', 'Noto Color Emoji', sans-serif; 
-                color: #333; 
-                margin: 20px; 
-            }}
+            body {{ font-family: 'Helvetica', 'Arial', sans-serif; color: #333; margin: 20px; }}
             .header {{ text-align: center; background-color: #1e1e2e; color: #fff; padding: 20px; border-radius: 8px; }}
             .score {{ font-size: 32px; font-weight: bold; margin: 10px 0; }}
             .sub-info {{ font-size: 13px; color: #ccc; }}
@@ -111,21 +120,21 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
             <div class="sub-info">Datum: {match_date} | Categorie {category} | Wedstrijdvorm: {fmt_val}v{fmt_val} | Speeltijd: 2x {half_duration} min</div>
         </div>
 
-        <div class="section-title">👥 Opstellingen</div>
+        <div class="section-title">{ICON_LINEUP} Opstellingen</div>
         <div class="teams-container">
             <div class="team-box">
-                <h3>🏠 {home_team}</h3>
+                <h3>{ICON_HOME} {home_team}</h3>
                 <b>Basis:</b><br>{render_player_list(starters_h)}<br><br>
                 <b>Wissels:</b><br>{render_player_list(subs_h)}
             </div>
             <div class="team-box">
-                <h3>🚩 {away_team}</h3>
+                <h3>{ICON_AWAY} {away_team}</h3>
                 <b>Basis:</b><br>{render_player_list(starters_a)}<br><br>
                 <b>Wissels:</b><br>{render_player_list(subs_a)}
             </div>
         </div>
 
-        <div class="section-title">📋 Wedstrijdverloop</div>
+        <div class="section-title">{ICON_LOG} Wedstrijdverloop</div>
         <table>
             <thead>
                 <tr>

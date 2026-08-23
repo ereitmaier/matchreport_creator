@@ -84,7 +84,13 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
     <head>
         <meta charset="utf-8">
         <style>
-            body {{ font-family: 'Helvetica', 'Arial', sans-serif; color: #333; margin: 20px; }}
+            @import url('https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap');
+            
+            body {{ 
+                font-family: 'Helvetica', 'Arial', 'Noto Color Emoji', sans-serif; 
+                color: #333; 
+                margin: 20px; 
+            }}
             .header {{ text-align: center; background-color: #1e1e2e; color: #fff; padding: 20px; border-radius: 8px; }}
             .score {{ font-size: 32px; font-weight: bold; margin: 10px 0; }}
             .sub-info {{ font-size: 13px; color: #ccc; }}

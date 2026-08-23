@@ -56,13 +56,13 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
     fmt_val = match_info.get("format", 11)
     half_duration = match_info.get("half_duration", 45)
 
-    # Twemoji SVG icon URLs (gegarandeerde rendering in WeasyPrint PDF)
-    ICON_HOME = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f3e0.svg" width="16" height="16" style="vertical-align: middle; margin-right: 4px;">'
-    ICON_AWAY = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f6a9.svg" width="16" height="16" style="vertical-align: middle; margin-right: 4px;">'
-    ICON_LINEUP = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f465.svg" width="18" height="18" style="vertical-align: middle; margin-right: 6px;">'
-    ICON_LOG = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f4cb.svg" width="18" height="18" style="vertical-align: middle; margin-right: 6px;">'
-    ICON_TIMER = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/23f1.svg" width="14" height="14" style="vertical-align: middle; margin-right: 4px;">'
-    ICON_BALL = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/26bd.svg" width="14" height="14" style="vertical-align: middle; margin-right: 4px;">'
+    # Twemoji SVG icon URLs met Strikte inline dimensions voor WeasyPrint
+    ICON_HOME = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f3e0.svg" class="icon-sm">'
+    ICON_AWAY = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f6a9.svg" class="icon-sm">'
+    ICON_LINEUP = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f465.svg" class="icon-md">'
+    ICON_LOG = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f4cb.svg" class="icon-md">'
+    ICON_TIMER = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/23f1.svg" class="icon-sm">'
+    ICON_BALL = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/26bd.svg" class="icon-sm">'
 
     events_html = ""
     for ev in events_info:
@@ -99,19 +99,90 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
     <head>
         <meta charset="utf-8">
         <style>
-            body {{ font-family: 'Helvetica', 'Arial', sans-serif; color: #333; margin: 20px; }}
-            .header {{ text-align: center; background-color: #1e1e2e; color: #fff; padding: 20px; border-radius: 8px; }}
-            .score {{ font-size: 32px; font-weight: bold; margin: 10px 0; }}
-            .sub-info {{ font-size: 13px; color: #ccc; }}
-            .section-title {{ font-size: 18px; font-weight: bold; border-bottom: 2px solid #2980b9; margin-top: 25px; padding-bottom: 5px; color: #2d2d3f; }}
-            .teams-container {{ display: flex; justify-content: space-between; margin-top: 15px; }}
-            .team-box {{ width: 48%; background: #f8f9fa; padding: 12px; border-radius: 6px; border: 1px solid #ddd; }}
-            .team-box h3 {{ margin-top: 0; color: #2980b9; }}
-            table {{ width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 12px; }}
-            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-            th {{ background-color: #2d2d3f; color: white; }}
+            @page {{
+                size: A4;
+                margin: 15mm;
+            }}
+            body {{ 
+                font-family: 'Helvetica', 'Arial', sans-serif; 
+                color: #333; 
+                margin: 0;
+                padding: 0;
+            }}
+            img {{
+                max-width: 100%;
+            }}
+            .icon-sm {{
+                width: 14px !important;
+                height: 14px !important;
+                vertical-align: -2px;
+                display: inline-block;
+            }}
+            .icon-md {{
+                width: 18px !important;
+                height: 18px !important;
+                vertical-align: -3px;
+                display: inline-block;
+            }}
+            .header {{ 
+                text-align: center; 
+                background-color: #1e1e2e; 
+                color: #fff; 
+                padding: 15px; 
+                border-radius: 8px; 
+            }}
+            .score {{ font-size: 26px; font-weight: bold; margin: 5px 0; }}
+            .sub-info {{ font-size: 12px; color: #ccc; }}
+            
+            .section-title {{ 
+                font-size: 16px; 
+                font-weight: bold; 
+                border-bottom: 2px solid #2980b9; 
+                margin-top: 20px; 
+                padding-bottom: 5px; 
+                color: #2d2d3f; 
+            }}
+            
+            /* Gebruik een HTML tabel voor de opstellingen t.b.v. WeasyPrint stabiliteit */
+            .teams-table {{ 
+                width: 100%; 
+                margin-top: 10px; 
+                border-collapse: separate;
+                border-spacing: 10px 0;
+            }}
+            .team-box {{ 
+                width: 50%; 
+                vertical-align: top;
+                background: #f8f9fa; 
+                padding: 12px; 
+                border-radius: 6px; 
+                border: 1px solid #ddd; 
+                font-size: 12px;
+            }}
+            .team-box h3 {{ 
+                margin-top: 0; 
+                margin-bottom: 8px;
+                color: #2980b9; 
+                font-size: 14px;
+            }}
+            
+            table.events-table {{ 
+                width: 100%; 
+                border-collapse: collapse; 
+                margin-top: 10px; 
+                font-size: 11px; 
+            }}
+            table.events-table th, table.events-table td {{ 
+                border: 1px solid #ddd; 
+                padding: 6px 8px; 
+                text-align: left; 
+            }}
+            table.events-table th {{ 
+                background-color: #2d2d3f; 
+                color: white; 
+            }}
             .marker-row {{ background-color: #eaeded; text-align: center; }}
-            .footer {{ margin-top: 30px; text-align: center; font-size: 10px; color: #888; }}
+            .footer {{ margin-top: 25px; text-align: center; font-size: 10px; color: #888; }}
         </style>
     </head>
     <body>
@@ -121,21 +192,23 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
         </div>
 
         <div class="section-title">{ICON_LINEUP} Opstellingen</div>
-        <div class="teams-container">
-            <div class="team-box">
-                <h3>{ICON_HOME} {home_team}</h3>
-                <b>Basis:</b><br>{render_player_list(starters_h)}<br><br>
-                <b>Wissels:</b><br>{render_player_list(subs_h)}
-            </div>
-            <div class="team-box">
-                <h3>{ICON_AWAY} {away_team}</h3>
-                <b>Basis:</b><br>{render_player_list(starters_a)}<br><br>
-                <b>Wissels:</b><br>{render_player_list(subs_a)}
-            </div>
-        </div>
+        <table class="teams-table">
+            <tr>
+                <td class="team-box">
+                    <h3>{ICON_HOME} {home_team}</h3>
+                    <b>Basis:</b><br>{render_player_list(starters_h)}<br><br>
+                    <b>Wissels:</b><br>{render_player_list(subs_h)}
+                </td>
+                <td class="team-box">
+                    <h3>{ICON_AWAY} {away_team}</h3>
+                    <b>Basis:</b><br>{render_player_list(starters_a)}<br><br>
+                    <b>Wissels:</b><br>{render_player_list(subs_a)}
+                </td>
+            </tr>
+        </table>
 
         <div class="section-title">{ICON_LOG} Wedstrijdverloop</div>
-        <table>
+        <table class="events-table">
             <thead>
                 <tr>
                     <th width="15%">Tijd</th>

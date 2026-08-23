@@ -56,33 +56,41 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
     fmt_val = match_info.get("format", 11)
     half_duration = match_info.get("half_duration", 45)
 
-    # Twemoji SVG icon URLs met Strikte inline dimensions voor WeasyPrint
+    # Twemoji SVG icon URLs met Strikte inline dimensions en afstands-margins
     ICON_HOME = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f3e0.svg" class="icon-sm">'
     ICON_AWAY = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f6a9.svg" class="icon-sm">'
     ICON_LINEUP = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f465.svg" class="icon-md">'
     ICON_LOG = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f4cb.svg" class="icon-md">'
     ICON_TIMER = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/23f1.svg" class="icon-sm">'
     ICON_BALL = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/26bd.svg" class="icon-sm">'
+    ICON_SUB = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f504.svg" class="icon-sm">'
 
     events_html = ""
     for ev in events_info:
         t_str = ev.get("time", "")
         if ev.get("marker"):
-            events_html += f"<tr class='marker-row'><td colspan='4'><b>{ICON_TIMER} {ev.get('event', '')}</b> ({ev.get('extra', '')})</td></tr>"
+            events_html += f"<tr class='marker-row'><td colspan='4'><b>{ICON_TIMER}{ev.get('event', '')}</b> ({ev.get('extra', '')})</td></tr>"
         else:
             team_name = home_team if ev.get("team") == "home" else (away_team if ev.get("team") == "away" else "-")
             og = " (Eigen Doelpunt)" if ev.get("own_goal") else ""
             
+            ev_name = ev.get('event', '')
             ev_icon = ev.get('icon', '')
-            if "⚽" in ev_icon or "Goal" in ev.get('event', '') or "Doelpunt" in ev.get('event', ''):
+
+            # Bepaal het icoon dynamisch op basis van de gebeurtenis
+            if "⚽" in ev_icon or "Goal" in ev_name or "Doelpunt" in ev_name:
                 icon_html = ICON_BALL
+            elif "🔄" in ev_icon or "Wissel" in ev_name:
+                icon_html = ICON_SUB
+            elif ev_icon:
+                icon_html = f"{ev_icon} "
             else:
-                icon_html = f"{ev_icon} " if ev_icon else ""
+                icon_html = ""
 
             events_html += f"""
             <tr>
                 <td><b>{t_str}</b></td>
-                <td>{icon_html}{ev.get('event', '')}{og}</td>
+                <td>{icon_html}{ev_name}{og}</td>
                 <td>{team_name}</td>
                 <td>{ev.get('player', '-')} {f"({ev.get('extra')})" if ev.get('extra') else ''}</td>
             </tr>
@@ -117,12 +125,14 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
                 height: 14px !important;
                 vertical-align: -2px;
                 display: inline-block;
+                margin-right: 6px !important;
             }}
             .icon-md {{
                 width: 18px !important;
                 height: 18px !important;
                 vertical-align: -3px;
                 display: inline-block;
+                margin-right: 8px !important;
             }}
             .header {{ 
                 text-align: center; 
@@ -143,7 +153,6 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
                 color: #2d2d3f; 
             }}
             
-            /* Gebruik een HTML tabel voor de opstellingen t.b.v. WeasyPrint stabiliteit */
             .teams-table {{ 
                 width: 100%; 
                 margin-top: 10px; 
@@ -191,23 +200,23 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
             <div class="sub-info">Datum: {match_date} | Categorie {category} | Wedstrijdvorm: {fmt_val}v{fmt_val} | Speeltijd: 2x {half_duration} min</div>
         </div>
 
-        <div class="section-title">{ICON_LINEUP} Opstellingen</div>
+        <div class="section-title">{ICON_LINEUP}Opstellingen</div>
         <table class="teams-table">
             <tr>
                 <td class="team-box">
-                    <h3>{ICON_HOME} {home_team}</h3>
+                    <h3>{ICON_HOME}{home_team}</h3>
                     <b>Basis:</b><br>{render_player_list(starters_h)}<br><br>
                     <b>Wissels:</b><br>{render_player_list(subs_h)}
                 </td>
                 <td class="team-box">
-                    <h3>{ICON_AWAY} {away_team}</h3>
+                    <h3>{ICON_AWAY}{away_team}</h3>
                     <b>Basis:</b><br>{render_player_list(starters_a)}<br><br>
                     <b>Wissels:</b><br>{render_player_list(subs_a)}
                 </td>
             </tr>
         </table>
 
-        <div class="section-title">{ICON_LOG} Wedstrijdverloop</div>
+        <div class="section-title">{ICON_LOG}Wedstrijdverloop</div>
         <table class="events-table">
             <thead>
                 <tr>

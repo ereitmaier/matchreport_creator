@@ -12,7 +12,7 @@ try:
 except Exception:
     WEASYPRINT_AVAILABLE = False
 
-APP_VERSION = "v1.4.0 - Doelpuntenmakers Overzicht Toegevoegd"
+APP_VERSION = "v1.5.0 - Kaarten Overzicht Toegevoegd"
 
 # -----------------------------------------------------------------------------
 # Pagina Configuratie
@@ -48,7 +48,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# Logica voor Doelpuntenmakers en Minuten
+# Logica voor Doelpunten, Kaarten en Minuten
 # -----------------------------------------------------------------------------
 def clean_player_name(raw_name):
     """Verwijdert rugnummers/voorvoegsels uit de spelersnaam."""
@@ -83,8 +83,6 @@ def calculate_goalscorers(events_info, home_team, away_team):
             p_name = clean_player_name(raw_player)
             team_key = ev.get('team', '')
 
-            # Bij een eigen doelpunt telt het doelpunt voor de tegenstander,
-            # maar noteren we het als eigen doelpunt achter de naam van de maker.
             if own_goal:
                 scoring_team = away_team if team_key == 'home' else home_team
                 display_name = f"{p_name} (Eigen Doelpunt)"
@@ -103,6 +101,52 @@ def calculate_goalscorers(events_info, home_team, away_team):
 
     result = list(scorers.values())
     result.sort(key=lambda x: x['goals'], reverse=True)
+    return result
+
+def calculate_cards(events_info, home_team, away_team):
+    """
+    Verzamelt alle gele en rode kaarten per speler.
+    """
+    cards = {}
+
+    for ev in events_info:
+        if ev.get('marker'):
+            continue
+
+        ev_name = str(ev.get('event', ''))
+        ev_icon = str(ev.get('icon', ''))
+        t_str = str(ev.get('time', ''))
+        team_key = ev.get('team', '')
+        t_label = home_team if team_key == 'home' else (away_team if team_key == 'away' else '-')
+
+        card_type = None
+        if "Gele kaart" in ev_name or "🟨" in ev_icon or "Geel" in ev_name:
+            card_type = "🟨 Geel"
+        elif "Rode kaart" in ev_name or "🟥" in ev_icon or "Rood" in ev_name:
+            card_type = "🟥 Rood"
+
+        if card_type:
+            raw_player = str(ev.get('player', 'Onbekend')).strip()
+            p_name = clean_player_name(raw_player)
+            key = f"{t_label}_{p_name}"
+
+            if key not in cards:
+                cards[key] = {
+                    'name': p_name,
+                    'team': t_label,
+                    'yellow': 0,
+                    'red': 0,
+                    'times': []
+                }
+
+            if "Geel" in card_type:
+                cards[key]['yellow'] += 1
+            elif "Rood" in card_type:
+                cards[key]['red'] += 1
+
+            cards[key]['times'].append(f"{t_str} ({card_type})")
+
+    result = list(cards.values())
     return result
 
 def parse_time_to_minutes(time_str, half_duration=45):
@@ -220,7 +264,7 @@ def calculate_player_minutes(starters_h, subs_h, starters_a, subs_a, events_info
 # -----------------------------------------------------------------------------
 # PDF Generator
 # -----------------------------------------------------------------------------
-def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, starters_a, subs_a, events_info, minutes_list, goalscorers_list):
+def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, starters_a, subs_a, events_info, minutes_list, goalscorers_list, cards_list):
     home_team = match_info.get("home", "Thuisploeg")
     away_team = match_info.get("away", "Uitploeg")
     match_date = match_info.get("date", "Onbekend")
@@ -236,6 +280,7 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
     ICON_BALL = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/26bd.svg" class="icon-sm">'
     ICON_SUB = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f504.svg" class="icon-sm">'
     ICON_STATS = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f4ca.svg" class="icon-md">'
+    ICON_CARD = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f3f7.svg" class="icon-md">'
 
     events_html = ""
     for ev in events_info:
@@ -285,6 +330,22 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
             """
     else:
         goalscorers_html = "<tr><td colspan='3'><i>Geen doelpunten gescoord in deze wedstrijd</i></td></tr>"
+
+    # HTML Kaarten / Sancties
+    cards_html = ""
+    if cards_list:
+        for c in cards_list:
+            details_str = ", ".join(c['times'])
+            cards_html += f"""
+            <tr>
+                <td><b>{c['name']}</b></td>
+                <td>{c['team']}</td>
+                <td>🟨 {c['yellow']} &nbsp;|&nbsp; 🟥 {c['red']}</td>
+                <td><small>{details_str}</small></td>
+            </tr>
+            """
+    else:
+        cards_html = "<tr><td colspan='4'><i>Geen kaarten gegeven in deze wedstrijd</i></td></tr>"
 
     # HTML Gespeelde minuten
     minutes_html = ""
@@ -387,6 +448,23 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
                 </thead>
                 <tbody>
                     {goalscorers_html}
+                </tbody>
+            </table>
+        </div>
+
+        <div class="keep-together">
+            <div class="section-title">{ICON_CARD}Kaarten & Sancties</div>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th width="35%">Speler</th>
+                        <th width="25%">Team</th>
+                        <th width="20%">Kaarten</th>
+                        <th width="20%">Tijdstip(pen)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {cards_html}
                 </tbody>
             </table>
         </div>
@@ -528,6 +606,7 @@ if data:
 
     minutes_list = calculate_player_minutes(starters_h, subs_h, starters_a, subs_a, events_info, total_match_minutes, half_duration)
     goalscorers_list = calculate_goalscorers(events_info, home_team, away_team)
+    cards_list = calculate_cards(events_info, home_team, away_team)
 
     st.markdown(f"""
         <div class="score-banner">
@@ -544,7 +623,7 @@ if data:
 
     st.divider()
 
-    pdf_file_data = generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, starters_a, subs_a, events_info, minutes_list, goalscorers_list)
+    pdf_file_data = generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, starters_a, subs_a, events_info, minutes_list, goalscorers_list, cards_list)
     mime_type = "application/pdf" if WEASYPRINT_AVAILABLE else "text/html"
     file_ext = "pdf" if WEASYPRINT_AVAILABLE else "html"
 
@@ -618,7 +697,8 @@ if data:
                     st.write(f"• #{p.get('number', '')} {p.get('name', '')}")
 
     with tab_stats:
-        col_g, col_m = st.columns([1, 1])
+        col_g, col_c = st.columns(2)
+        
         with col_g:
             st.subheader("⚽ Doelpuntenmakers")
             if goalscorers_list:
@@ -634,18 +714,36 @@ if data:
             else:
                 st.info("Geen doelpunten gescoord.")
 
-        with col_m:
-            st.subheader("⏱️ Gespeelde Minuten per Speler")
-            df_minutes = pd.DataFrame([
-                {
-                    "Rugnummer": p['number'],
-                    "Speler": p['clean_name'],
-                    "Team": home_team if p['team'] == 'home' else away_team,
-                    "Gespeelde Minuten": f"{int(p['total_minutes'])} min"
-                }
-                for p in minutes_list
-            ])
-            st.dataframe(df_minutes, use_container_width=True, hide_index=True)
+        with col_c:
+            st.subheader("🟨 / 🟥 Kaarten & Sancties")
+            if cards_list:
+                df_cards = pd.DataFrame([
+                    {
+                        "Speler": c['name'],
+                        "Team": c['team'],
+                        "Geel": c['yellow'],
+                        "Rood": c['red'],
+                        "Tijdstip(pen)": ", ".join(c['times'])
+                    }
+                    for c in cards_list
+                ])
+                st.dataframe(df_cards, use_container_width=True, hide_index=True)
+            else:
+                st.info("Geen kaarten gegeven.")
+
+        st.divider()
+
+        st.subheader("⏱️ Gespeelde Minuten per Speler")
+        df_minutes = pd.DataFrame([
+            {
+                "Rugnummer": p['number'],
+                "Speler": p['clean_name'],
+                "Team": home_team if p['team'] == 'home' else away_team,
+                "Gespeelde Minuten": f"{int(p['total_minutes'])} min"
+            }
+            for p in minutes_list
+        ])
+        st.dataframe(df_minutes, use_container_width=True, hide_index=True)
 
     with tab_raw:
         st.subheader("Exporteer Opties")

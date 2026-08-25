@@ -12,8 +12,7 @@ try:
 except Exception:
     WEASYPRINT_AVAILABLE = False
 
-# Versie-indicator
-APP_VERSION = "v1.3.0 - Page Break & Minuten Fix Active"
+APP_VERSION = "v1.4.0 - Doelpuntenmakers Overzicht Toegevoegd"
 
 # -----------------------------------------------------------------------------
 # Pagina Configuratie
@@ -49,10 +48,64 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# Logica voor Minutenberekening
+# Logica voor Doelpuntenmakers en Minuten
 # -----------------------------------------------------------------------------
+def clean_player_name(raw_name):
+    """Verwijdert rugnummers/voorvoegsels uit de spelersnaam."""
+    if not raw_name:
+        return ""
+    return re.sub(r'^\d+[\.\s\-]+', '', str(raw_name)).strip()
+
+def calculate_goalscorers(events_info, home_team, away_team):
+    """
+    Verzamelt en telt alle doelpunten per speler uit het wedstrijdverloop.
+    """
+    scorers = {}
+
+    for ev in events_info:
+        if ev.get('marker'):
+            continue
+
+        ev_name = str(ev.get('event', ''))
+        ev_icon = str(ev.get('icon', ''))
+        extra = str(ev.get('extra', ''))
+        own_goal = ev.get('own_goal', False)
+
+        is_goal = False
+        if "Doelpunt" in ev_name or "Goal" in ev_name or "⚽" in ev_icon:
+            is_goal = True
+        elif "Penalty" in ev_name:
+            if not any(x in extra for x in ["Naast/Over", "Gestopt", "Off target", "Blocked"]):
+                is_goal = True
+
+        if is_goal:
+            raw_player = str(ev.get('player', 'Onbekend')).strip()
+            p_name = clean_player_name(raw_player)
+            team_key = ev.get('team', '')
+
+            # Bij een eigen doelpunt telt het doelpunt voor de tegenstander,
+            # maar noteren we het als eigen doelpunt achter de naam van de maker.
+            if own_goal:
+                scoring_team = away_team if team_key == 'home' else home_team
+                display_name = f"{p_name} (Eigen Doelpunt)"
+            else:
+                scoring_team = home_team if team_key == 'home' else away_team
+                display_name = p_name
+
+            key = f"{scoring_team}_{display_name}"
+            if key not in scorers:
+                scorers[key] = {
+                    'name': display_name,
+                    'team': scoring_team,
+                    'goals': 0
+                }
+            scorers[key]['goals'] += 1
+
+    result = list(scorers.values())
+    result.sort(key=lambda x: x['goals'], reverse=True)
+    return result
+
 def parse_time_to_minutes(time_str, half_duration=45):
-    """Zet 'P1 | 24:57' om naar 24.95 en 'P2 | 13:51' naar 45 + 13.85."""
     try:
         s = str(time_str).strip()
         period_offset = 0.0
@@ -75,12 +128,6 @@ def parse_time_to_minutes(time_str, half_duration=45):
         return period_offset + mins
     except Exception:
         return 0.0
-
-def clean_player_name(raw_name):
-    """Verwijdert rugnummers/voorvoegsels uit de spelersnaam."""
-    if not raw_name:
-        return ""
-    return re.sub(r'^\d+[\.\s\-]+', '', str(raw_name)).strip()
 
 def calculate_player_minutes(starters_h, subs_h, starters_a, subs_a, events_info, total_match_minutes, half_duration):
     players = {}
@@ -173,7 +220,7 @@ def calculate_player_minutes(starters_h, subs_h, starters_a, subs_a, events_info
 # -----------------------------------------------------------------------------
 # PDF Generator
 # -----------------------------------------------------------------------------
-def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, starters_a, subs_a, events_info, minutes_list):
+def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, starters_a, subs_a, events_info, minutes_list, goalscorers_list):
     home_team = match_info.get("home", "Thuisploeg")
     away_team = match_info.get("away", "Uitploeg")
     match_date = match_info.get("date", "Onbekend")
@@ -225,6 +272,21 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
             return "<i>Geen spelers opgegeven</i>"
         return "<br>".join([f"#{p.get('number', '')} {p.get('name', '')}" for p in players])
 
+    # HTML Doelpuntenmakers
+    goalscorers_html = ""
+    if goalscorers_list:
+        for g in goalscorers_list:
+            goalscorers_html += f"""
+            <tr>
+                <td><b>{g['name']}</b></td>
+                <td>{g['team']}</td>
+                <td><b>{g['goals']} {ICON_BALL}</b></td>
+            </tr>
+            """
+    else:
+        goalscorers_html = "<tr><td colspan='3'><i>Geen doelpunten gescoord in deze wedstrijd</i></td></tr>"
+
+    # HTML Gespeelde minuten
     minutes_html = ""
     for p in minutes_list:
         t_label = home_team if p['team'] == 'home' else away_team
@@ -312,6 +374,22 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
                 {events_html}
             </tbody>
         </table>
+
+        <div class="keep-together">
+            <div class="section-title">{ICON_BALL}Doelpuntenmakers</div>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th width="50%">Speler</th>
+                        <th width="30%">Team</th>
+                        <th width="20%">Doelpunten</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {goalscorers_html}
+                </tbody>
+            </table>
+        </div>
 
         <div class="keep-together">
             <div class="section-title">{ICON_STATS}Totaal Gespeelde Minuten per Speler</div>
@@ -449,6 +527,7 @@ if data:
                 elif team == "away": away_score += 1
 
     minutes_list = calculate_player_minutes(starters_h, subs_h, starters_a, subs_a, events_info, total_match_minutes, half_duration)
+    goalscorers_list = calculate_goalscorers(events_info, home_team, away_team)
 
     st.markdown(f"""
         <div class="score-banner">
@@ -465,7 +544,7 @@ if data:
 
     st.divider()
 
-    pdf_file_data = generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, starters_a, subs_a, events_info, minutes_list)
+    pdf_file_data = generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, starters_a, subs_a, events_info, minutes_list, goalscorers_list)
     mime_type = "application/pdf" if WEASYPRINT_AVAILABLE else "text/html"
     file_ext = "pdf" if WEASYPRINT_AVAILABLE else "html"
 
@@ -477,7 +556,7 @@ if data:
         use_container_width=True
     )
 
-    tab_log, tab_lineup, tab_stats, tab_raw = st.tabs(["📋 Live Wedstrijdverloop", "👥 Opstellingen", "📊 Speelminuten", "📄 Ruwe Data & Export"])
+    tab_log, tab_lineup, tab_stats, tab_raw = st.tabs(["📋 Live Wedstrijdverloop", "👥 Opstellingen", "📊 Statistieken", "📄 Ruwe Data & Export"])
 
     with tab_log:
         st.subheader("Wedstrijdverloop & Gebeurtenissen")
@@ -539,17 +618,34 @@ if data:
                     st.write(f"• #{p.get('number', '')} {p.get('name', '')}")
 
     with tab_stats:
-        st.subheader("Totaal Gespeelde Minuten per Speler")
-        df_minutes = pd.DataFrame([
-            {
-                "Rugnummer": p['number'],
-                "Speler": p['clean_name'],
-                "Team": home_team if p['team'] == 'home' else away_team,
-                "Gespeelde Minuten": f"{int(p['total_minutes'])} min"
-            }
-            for p in minutes_list
-        ])
-        st.dataframe(df_minutes, use_container_width=True, hide_index=True)
+        col_g, col_m = st.columns([1, 1])
+        with col_g:
+            st.subheader("⚽ Doelpuntenmakers")
+            if goalscorers_list:
+                df_goals = pd.DataFrame([
+                    {
+                        "Speler": g['name'],
+                        "Team": g['team'],
+                        "Doelpunten": g['goals']
+                    }
+                    for g in goalscorers_list
+                ])
+                st.dataframe(df_goals, use_container_width=True, hide_index=True)
+            else:
+                st.info("Geen doelpunten gescoord.")
+
+        with col_m:
+            st.subheader("⏱️ Gespeelde Minuten per Speler")
+            df_minutes = pd.DataFrame([
+                {
+                    "Rugnummer": p['number'],
+                    "Speler": p['clean_name'],
+                    "Team": home_team if p['team'] == 'home' else away_team,
+                    "Gespeelde Minuten": f"{int(p['total_minutes'])} min"
+                }
+                for p in minutes_list
+            ])
+            st.dataframe(df_minutes, use_container_width=True, hide_index=True)
 
     with tab_raw:
         st.subheader("Exporteer Opties")

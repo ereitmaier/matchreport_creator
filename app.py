@@ -12,7 +12,7 @@ try:
 except Exception:
     WEASYPRINT_AVAILABLE = False
 
-APP_VERSION = "v1.5.0 - Kaarten Overzicht Toegevoegd"
+APP_VERSION = "v1.5.1 - Kaarten Overzicht Toegevoegd"
 
 # -----------------------------------------------------------------------------
 # Pagina Configuratie
@@ -58,7 +58,8 @@ def clean_player_name(raw_name):
 
 def calculate_goalscorers(events_info, home_team, away_team):
     """
-    Verzamelt en telt alle doelpunten per speler uit het wedstrijdverloop.
+    Verzamelt en telt alle doelpunten per speler uit het wedstrijdverloop,
+    inclusief de minuten waarop gescoord is.
     """
     scorers = {}
 
@@ -70,6 +71,7 @@ def calculate_goalscorers(events_info, home_team, away_team):
         ev_icon = str(ev.get('icon', ''))
         extra = str(ev.get('extra', ''))
         own_goal = ev.get('own_goal', False)
+        t_str = str(ev.get('time', '')).strip()
 
         is_goal = False
         if "Doelpunt" in ev_name or "Goal" in ev_name or "⚽" in ev_icon:
@@ -83,6 +85,7 @@ def calculate_goalscorers(events_info, home_team, away_team):
             p_name = clean_player_name(raw_player)
             team_key = ev.get('team', '')
 
+            # Bij een eigen doelpunt telt het doelpunt voor de tegenstander
             if own_goal:
                 scoring_team = away_team if team_key == 'home' else home_team
                 display_name = f"{p_name} (Eigen Doelpunt)"
@@ -90,14 +93,24 @@ def calculate_goalscorers(events_info, home_team, away_team):
                 scoring_team = home_team if team_key == 'home' else away_team
                 display_name = p_name
 
+            # Schoon de tijdsindeling op (bijv. 'P1 | 14:12' -> '14'')
+            clean_time = t_str.replace("P1 |", "").replace("P2 |", "").strip()
+            if ":" in clean_time:
+                clean_time = clean_time.split(":")[0]  # pakt alleen de minuut
+            if clean_time and not clean_time.endswith("'"):
+                clean_time = f"{clean_time}'"
+
             key = f"{scoring_team}_{display_name}"
             if key not in scorers:
                 scorers[key] = {
                     'name': display_name,
                     'team': scoring_team,
-                    'goals': 0
+                    'goals': 0,
+                    'minutes': []
                 }
             scorers[key]['goals'] += 1
+            if clean_time:
+                scorers[key]['minutes'].append(clean_time)
 
     result = list(scorers.values())
     result.sort(key=lambda x: x['goals'], reverse=True)
@@ -318,14 +331,17 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
         return "<br>".join([f"#{p.get('number', '')} {p.get('name', '')}" for p in players])
 
     # HTML Doelpuntenmakers
+
+    # HTML opbouw voor PDF
     goalscorers_html = ""
     if goalscorers_list:
         for g in goalscorers_list:
+            mins_str = f" ({', '.join(g['minutes'])})" if g['minutes'] else ""
             goalscorers_html += f"""
             <tr>
                 <td><b>{g['name']}</b></td>
                 <td>{g['team']}</td>
-                <td><b>{g['goals']} {ICON_BALL}</b></td>
+                <td><b>{g['goals']} {ICON_BALL}{mins_str}</b></td>
             </tr>
             """
     else:
@@ -706,7 +722,7 @@ if data:
                     {
                         "Speler": g['name'],
                         "Team": g['team'],
-                        "Doelpunten": g['goals']
+                        "Doelpunten": f"{g['goals']} ⚽ ({', '.join(g['minutes'])})" if g['minutes'] else f"{g['goals']} ⚽"
                     }
                     for g in goalscorers_list
                 ])

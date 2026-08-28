@@ -12,7 +12,7 @@ try:
 except Exception:
     WEASYPRINT_AVAILABLE = False
 
-APP_VERSION = "v1.5.1 - Kaarten Overzicht Toegevoegd"
+APP_VERSION = "v1.6.0 - Lineup & Minutes Fix"
 
 # -----------------------------------------------------------------------------
 # Pagina Configuratie
@@ -48,7 +48,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# Logica voor Doelpunten, Kaarten en Minuten
+# Helper Functies
 # -----------------------------------------------------------------------------
 def clean_player_name(raw_name):
     """Verwijdert rugnummers/voorvoegsels uit de spelersnaam."""
@@ -56,11 +56,38 @@ def clean_player_name(raw_name):
         return ""
     return re.sub(r'^\d+[\.\s\-]+', '', str(raw_name)).strip()
 
+def parse_time_to_minutes(time_str, half_duration=45):
+    """
+    Zet tijden zoals 'P1 | 24:57' om naar 24.95
+    en 'P2 | 13:51' naar 45 + 13.85 = 58.85
+    """
+    try:
+        s = str(time_str).strip()
+        period_offset = 0.0
+
+        if "P2" in s:
+            period_offset = float(half_duration)
+            s = s.replace("P2", "").replace("|", "").strip()
+        elif "P1" in s:
+            s = s.replace("P1", "").replace("|", "").strip()
+
+        if "+" in s:
+            s = s.split("+")[0]
+
+        if ":" in s:
+            parts = s.split(":")
+            mins = float(parts[0]) + float(parts[1]) / 60.0
+        else:
+            mins = float(s)
+
+        return period_offset + mins
+    except Exception:
+        return 0.0
+
+# -----------------------------------------------------------------------------
+# Logica voor Doelpunten, Kaarten en Minuten
+# -----------------------------------------------------------------------------
 def calculate_goalscorers(events_info, home_team, away_team):
-    """
-    Verzamelt en telt alle doelpunten per speler uit het wedstrijdverloop,
-    inclusief de minuten waarop gescoord is.
-    """
     scorers = {}
 
     for ev in events_info:
@@ -85,7 +112,6 @@ def calculate_goalscorers(events_info, home_team, away_team):
             p_name = clean_player_name(raw_player)
             team_key = ev.get('team', '')
 
-            # Bij een eigen doelpunt telt het doelpunt voor de tegenstander
             if own_goal:
                 scoring_team = away_team if team_key == 'home' else home_team
                 display_name = f"{p_name} (Eigen Doelpunt)"
@@ -93,10 +119,9 @@ def calculate_goalscorers(events_info, home_team, away_team):
                 scoring_team = home_team if team_key == 'home' else away_team
                 display_name = p_name
 
-            # Schoon de tijdsindeling op (bijv. 'P1 | 14:12' -> '14'')
             clean_time = t_str.replace("P1 |", "").replace("P2 |", "").strip()
             if ":" in clean_time:
-                clean_time = clean_time.split(":")[0]  # pakt alleen de minuut
+                clean_time = clean_time.split(":")[0]
             if clean_time and not clean_time.endswith("'"):
                 clean_time = f"{clean_time}'"
 
@@ -117,9 +142,6 @@ def calculate_goalscorers(events_info, home_team, away_team):
     return result
 
 def calculate_cards(events_info, home_team, away_team):
-    """
-    Verzamelt alle gele en rode kaarten per speler.
-    """
     cards = {}
 
     for ev in events_info:
@@ -161,30 +183,6 @@ def calculate_cards(events_info, home_team, away_team):
 
     result = list(cards.values())
     return result
-
-def parse_time_to_minutes(time_str, half_duration=45):
-    try:
-        s = str(time_str).strip()
-        period_offset = 0.0
-
-        if "P2" in s:
-            period_offset = float(half_duration)
-            s = s.replace("P2", "").replace("|", "").strip()
-        elif "P1" in s:
-            s = s.replace("P1", "").replace("|", "").strip()
-
-        if "+" in s:
-            s = s.split("+")[0]
-
-        if ":" in s:
-            parts = s.split(":")
-            mins = float(parts[0]) + float(parts[1]) / 60.0
-        else:
-            mins = float(s)
-
-        return period_offset + mins
-    except Exception:
-        return 0.0
 
 def calculate_player_minutes(starters_h, subs_h, starters_a, subs_a, events_info, total_match_minutes, half_duration):
     players = {}
@@ -330,9 +328,6 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
             return "<i>Geen spelers opgegeven</i>"
         return "<br>".join([f"#{p.get('number', '')} {p.get('name', '')}" for p in players])
 
-    # HTML Doelpuntenmakers
-
-    # HTML opbouw voor PDF
     goalscorers_html = ""
     if goalscorers_list:
         for g in goalscorers_list:
@@ -347,7 +342,6 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
     else:
         goalscorers_html = "<tr><td colspan='3'><i>Geen doelpunten gescoord in deze wedstrijd</i></td></tr>"
 
-    # HTML Kaarten / Sancties
     cards_html = ""
     if cards_list:
         for c in cards_list:
@@ -363,7 +357,6 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
     else:
         cards_html = "<tr><td colspan='4'><i>Geen kaarten gegeven in deze wedstrijd</i></td></tr>"
 
-    # HTML Gespeelde minuten
     minutes_html = ""
     for p in minutes_list:
         t_label = home_team if p['team'] == 'home' else away_team
@@ -686,7 +679,7 @@ if data:
         col_h, col_a = st.columns(2)
         with col_h:
             st.subheader(f"🏠 {home_team}")
-            st.markdown("**Basisopstelling / Selectie:**")
+            st.markdown("**Begin-opstelling:**")
             if starters_h:
                 for p in starters_h:
                     st.write(f"• #{p.get('number', '')} {p.get('name', '')}")
@@ -700,7 +693,7 @@ if data:
 
         with col_a:
             st.subheader(f"🚩 {away_team}")
-            st.markdown("**Basisopstelling / Selectie:**")
+            st.markdown("**Begin-opstelling:**")
             if starters_a:
                 for p in starters_a:
                     st.write(f"• #{p.get('number', '')} {p.get('name', '')}")

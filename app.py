@@ -12,7 +12,7 @@ try:
 except Exception:
     WEASYPRINT_AVAILABLE = False
 
-APP_VERSION = "v1.7.0 - Multiple Subs & Repeat Minutes Fix"
+APP_VERSION = "v1.8.0 - Initial Lineup Fix"
 
 # -----------------------------------------------------------------------------
 # Pagina Configuratie
@@ -83,6 +83,65 @@ def parse_time_to_minutes(time_str, half_duration=45):
         return period_offset + mins
     except Exception:
         return 0.0
+
+def derive_initial_rosters(starters_raw, subs_raw, events_info, team_key):
+    """
+    Herleidt de exacte beginopstelling en beginwissels.
+    Reconstrueert wissels terug in de tijd om te zien wie er écht begon op minuut 0.
+    """
+    all_players = []
+    seen = set()
+
+    # Verzamel alle unieke spelers uit de invoer
+    for p in (starters_raw or []) + (subs_raw or []):
+        name = clean_player_name(p.get('name', ''))
+        if name and name.lower() not in seen:
+            seen.add(name.lower())
+            all_players.append({
+                'number': p.get('number', ''),
+                'name': name,
+                'raw_name': p.get('name', '')
+            })
+
+    # Huidige situatie opstellen op basis van starters_raw
+    starter_names = {clean_player_name(p.get('name', '')).lower() for p in (starters_raw or [])}
+    
+    # Traceer wissels van achteren naar voren om de beginsituatie te herstellen
+    sub_events = [ev for ev in events_info if not ev.get('marker') and ev.get('team') == team_key and ("Wissel" in str(ev.get('event', '')) or "🔄" in str(ev.get('icon', '')))]
+    
+    # Draai de wissels om van laatst naar eerst
+    for ev in reversed(sub_events):
+        p_out_name, p_in_name = None, None
+        extra_val = str(ev.get('extra', ''))
+        player_val = str(ev.get('player', ''))
+
+        if "In:" in extra_val and "Out:" in extra_val:
+            m_in = re.search(r'In:\s*([^\|]+)', extra_val)
+            m_out = re.search(r'Out:\s*([^\|]+)', extra_val)
+            if m_in: p_in_name = clean_player_name(m_in.group(1)).lower()
+            if m_out: p_out_name = clean_player_name(m_out.group(1)).lower()
+        elif "->" in player_val:
+            parts = player_val.split("->")
+            p_out_name = clean_player_name(parts[0]).lower()
+            p_in_name = clean_player_name(parts[1]).lower()
+
+        # Terug in de tijd: Wie eruit ging stond er vóór de wissel in (dus starter)
+        if p_out_name:
+            starter_names.add(p_out_name)
+        # Terug in de tijd: Wie erin kwam stond er vóór de wissel uit (dus geen starter)
+        if p_in_name and p_in_name in starter_names:
+            starter_names.remove(p_in_name)
+
+    initial_starters = []
+    initial_subs = []
+
+    for p in all_players:
+        if p['name'].lower() in starter_names:
+            initial_starters.append(p)
+        else:
+            initial_subs.append(p)
+
+    return initial_starters, initial_subs
 
 # -----------------------------------------------------------------------------
 # Logica voor Doelpunten, Kaarten en Minuten
@@ -251,7 +310,6 @@ def calculate_player_minutes(starters_h, subs_h, starters_a, subs_a, events_info
                 p_out_name = parts[0].strip()
                 p_in_name = parts[1].strip()
 
-            # Verwerk speler UIT (telt opgebouwde minuten op en zet last_in op None)
             if p_out_name:
                 key_out = find_player_key(team, p_out_name)
                 if key_out and players[key_out]['on_field']:
@@ -260,14 +318,12 @@ def calculate_player_minutes(starters_h, subs_h, starters_a, subs_a, events_info
                     players[key_out]['on_field'] = False
                     players[key_out]['last_in'] = None
 
-            # Verwerk speler IN (zet on_field op True en onthoudt nieuwe invaltijd)
             if p_in_name:
                 key_in = find_player_key(team, p_in_name)
                 if key_in:
                     players[key_in]['on_field'] = True
                     players[key_in]['last_in'] = t_min
 
-    # Na afloop van de wedstrijd: tel voor wie NOG in het veld staat de resterende minuten op
     for key, pdata in players.items():
         if pdata['on_field'] and pdata['last_in'] is not None:
             players[key]['total_minutes'] += (total_match_minutes - pdata['last_in'])
@@ -419,7 +475,7 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
             <div class="sub-info">Datum: {match_date} | Categorie {category} | Wedstrijdvorm: {fmt_val}v{fmt_val} | Speeltijd: 2x {half_duration} min</div>
         </div>
 
-        <div class="section-title">{ICON_LINEUP}Opstellingen</div>
+        <div class="section-title">{ICON_LINEUP}Begin-opstellingen</div>
         <table class="teams-table">
             <tr>
                 <td class="team-box">
@@ -590,10 +646,14 @@ if data:
     total_match_minutes = half_duration * 2
 
     home_data = teams_info.get("home", {}) if isinstance(teams_info, dict) else data.get("home", [])
-    starters_h, subs_h = extract_roster(home_data)
+    starters_h_raw, subs_h_raw = extract_roster(home_data)
 
     away_data = teams_info.get("away", {}) if isinstance(teams_info, dict) else data.get("away", [])
-    starters_a, subs_a = extract_roster(away_data)
+    starters_a_raw, subs_a_raw = extract_roster(away_data)
+
+    # Herleid de echte beginopstellingen door wisselgebeurtenissen terug te rekenen
+    starters_h, subs_h = derive_initial_rosters(starters_h_raw, subs_h_raw, events_info, 'home')
+    starters_a, subs_a = derive_initial_rosters(starters_a_raw, subs_a_raw, events_info, 'away')
 
     home_score = 0
     away_score = 0
@@ -692,7 +752,7 @@ if data:
                 st.caption("Geen spelers opgegeven.")
 
             if subs_h:
-                st.markdown("**Wisselspelers:**")
+                st.markdown("**Wisselspelers bij Aftrap:**")
                 for p in subs_h:
                     st.write(f"• #{p.get('number', '')} {p.get('name', '')}")
 
@@ -706,7 +766,7 @@ if data:
                 st.caption("Geen spelers opgegeven.")
 
             if subs_a:
-                st.markdown("**Wisselspelers:**")
+                st.markdown("**Wisselspelers bij Aftrap:**")
                 for p in subs_a:
                     st.write(f"• #{p.get('number', '')} {p.get('name', '')}")
 

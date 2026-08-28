@@ -12,7 +12,7 @@ try:
 except Exception:
     WEASYPRINT_AVAILABLE = False
 
-APP_VERSION = "v1.6.0 - Lineup & Minutes Fix"
+APP_VERSION = "v1.7.0 - Multiple Subs & Repeat Minutes Fix"
 
 # -----------------------------------------------------------------------------
 # Pagina Configuratie
@@ -251,18 +251,23 @@ def calculate_player_minutes(starters_h, subs_h, starters_a, subs_a, events_info
                 p_out_name = parts[0].strip()
                 p_in_name = parts[1].strip()
 
+            # Verwerk speler UIT (telt opgebouwde minuten op en zet last_in op None)
             if p_out_name:
                 key_out = find_player_key(team, p_out_name)
                 if key_out and players[key_out]['on_field']:
-                    players[key_out]['total_minutes'] += (t_min - players[key_out]['last_in'])
+                    if players[key_out]['last_in'] is not None:
+                        players[key_out]['total_minutes'] += (t_min - players[key_out]['last_in'])
                     players[key_out]['on_field'] = False
+                    players[key_out]['last_in'] = None
 
+            # Verwerk speler IN (zet on_field op True en onthoudt nieuwe invaltijd)
             if p_in_name:
                 key_in = find_player_key(team, p_in_name)
                 if key_in:
                     players[key_in]['on_field'] = True
                     players[key_in]['last_in'] = t_min
 
+    # Na afloop van de wedstrijd: tel voor wie NOG in het veld staat de resterende minuten op
     for key, pdata in players.items():
         if pdata['on_field'] and pdata['last_in'] is not None:
             players[key]['total_minutes'] += (total_match_minutes - pdata['last_in'])

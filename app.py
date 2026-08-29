@@ -12,7 +12,7 @@ try:
 except Exception:
     WEASYPRINT_AVAILABLE = False
 
-APP_VERSION = "v1.8.0 - Initial Lineup Fix"
+APP_VERSION = "v1.9.0 - Lineups Sorted by Number"
 
 # -----------------------------------------------------------------------------
 # Pagina Configuratie
@@ -84,10 +84,14 @@ def parse_time_to_minutes(time_str, half_duration=45):
     except Exception:
         return 0.0
 
+# -----------------------------------------------------------------------------
+# Logica voor Begin-opstelling & Wissels (v1.9.0 Sortering)
+# -----------------------------------------------------------------------------
 def derive_initial_rosters(starters_raw, subs_raw, events_info, team_key):
     """
     Herleidt de exacte beginopstelling en beginwissels.
     Reconstrueert wissels terug in de tijd om te zien wie er écht begon op minuut 0.
+    Sorteert de lijsten vervolgens op rugnummer (numeriek).
     """
     all_players = []
     seen = set()
@@ -140,6 +144,17 @@ def derive_initial_rosters(starters_raw, subs_raw, events_info, team_key):
             initial_starters.append(p)
         else:
             initial_subs.append(p)
+
+    # Helper functie voor numerieke sortering op rugnummer
+    def sort_key(player):
+        try:
+            return int(player.get('number', 999))
+        except (ValueError, TypeError):
+            return 999
+
+    # Sorteer basis en wissels afzonderlijk op nummer
+    initial_starters.sort(key=sort_key)
+    initial_subs.sort(key=sort_key)
 
     return initial_starters, initial_subs
 

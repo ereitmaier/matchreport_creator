@@ -12,7 +12,7 @@ try:
 except Exception:
     WEASYPRINT_AVAILABLE = False
 
-APP_VERSION = "v1.9.0 - Lineups Sorted by Number"
+APP_VERSION = "v1.9.1 - Lineups Sorted by Number"
 
 # -----------------------------------------------------------------------------
 # Pagina Configuratie

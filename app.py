@@ -721,7 +721,7 @@ if data:
         data=pdf_file_data,
         file_name=f"rapport_{match_date}_{home_team}_vs_{away_team}.{file_ext}",
         mime=mime_type,
-        use_container_width=True
+        width='stretch'
     )
 
     tab_log, tab_lineup, tab_stats, tab_raw = st.tabs(["📋 Live Wedstrijdverloop", "👥 Opstellingen", "📊 Statistieken", "📄 Ruwe Data & Export"])
@@ -751,7 +751,7 @@ if data:
                     })
             
             df_log = pd.DataFrame(log_data)
-            st.dataframe(df_log, use_container_width=True, hide_index=True)
+            st.dataframe(df_log, width='stretch', hide_index=True)
         else:
             st.info("Geen gebeurtenissen geregistreerd in dit bestand.")
 
@@ -799,7 +799,7 @@ if data:
                     }
                     for g in goalscorers_list
                 ])
-                st.dataframe(df_goals, use_container_width=True, hide_index=True)
+                st.dataframe(df_goals, width='stretch', hide_index=True)
             else:
                 st.info("Geen doelpunten gescoord.")
 
@@ -816,7 +816,7 @@ if data:
                     }
                     for c in cards_list
                 ])
-                st.dataframe(df_cards, use_container_width=True, hide_index=True)
+                st.dataframe(df_cards, width='stretch', hide_index=True)
             else:
                 st.info("Geen kaarten gegeven.")
 
@@ -832,7 +832,7 @@ if data:
             }
             for p in minutes_list
         ])
-        st.dataframe(df_minutes, use_container_width=True, hide_index=True)
+        st.dataframe(df_minutes, width='stretch', hide_index=True)
 
     with tab_raw:
         st.subheader("Exporteer Opties")
@@ -843,7 +843,7 @@ if data:
                 data=pdf_file_data,
                 file_name=f"rapport_{match_date}_{home_team}_vs_{away_team}.{file_ext}",
                 mime=mime_type,
-                use_container_width=True
+                width='stretch'
             )
         with col_exp2:
             yaml_string = yaml.dump(data, default_flow_style=False, allow_unicode=True)
@@ -852,7 +852,7 @@ if data:
                 data=yaml_string,
                 file_name=f"export_match_{match_date}_{home_team}.yaml",
                 mime="text/yaml",
-                use_container_width=True
+                width='stretch'
             )
 
         st.markdown("---")

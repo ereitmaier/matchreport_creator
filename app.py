@@ -12,7 +12,7 @@ try:
 except Exception:
     WEASYPRINT_AVAILABLE = False
 
-APP_VERSION = "v1.9.3 - Clean PDF Subs & Rust Fix"
+APP_VERSION = "v1.9.4 - Rust & Verlenging Subs Support"
 
 # -----------------------------------------------------------------------------
 # Pagina Configuratie
@@ -62,16 +62,27 @@ def clean_player_name(raw_name):
 def parse_time_to_minutes(time_str, half_duration=45):
     """
     Zet tijden om naar minuten. 
-    Verwerkt ook 'RUST', 'PAUZE', 'P1 | 20:19' en 'P2 | 10:00'.
+    Verwerkt ook 'RUST', 'PRE_VERLENGING', 'HALVERWEGE_VERL', 'P1 | 20:19', etc.
     """
     try:
         s = str(time_str).strip().upper()
         
+        # Pauze- en rustmarkeringen afvangen
         if "RUST" in s or "PAUZE" in s:
             return float(half_duration)
+        if "PRE_VERLENGING" in s:
+            return float(half_duration * 2)
+        if "HALVERWEGE_VERL" in s:
+            return float((half_duration * 2) + 15)
 
         period_offset = 0.0
-        if "P2" in s:
+        if "P4" in s:
+            period_offset = float((half_duration * 2) + 15)
+            s = s.replace("P4", "").replace("|", "").strip()
+        elif "P3" in s:
+            period_offset = float(half_duration * 2)
+            s = s.replace("P3", "").replace("|", "").strip()
+        elif "P2" in s:
             period_offset = float(half_duration)
             s = s.replace("P2", "").replace("|", "").strip()
         elif "P1" in s:
@@ -125,7 +136,7 @@ def calculate_goalscorers(events_info, home_team, away_team):
                 scoring_team = home_team if team_key == 'home' else away_team
                 display_name = p_name
 
-            clean_time = t_str.replace("P1 |", "").replace("P2 |", "").strip()
+            clean_time = t_str.replace("P1 |", "").replace("P2 |", "").replace("P3 |", "").replace("P4 |", "").strip()
             if ":" in clean_time:
                 clean_time = clean_time.split(":")[0]
             if clean_time and not clean_time.endswith("'"):
@@ -518,7 +529,7 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
             </table>
         </div>
 
-        <div class="footer">Gegenereerd door Team Level Up Match Report Creator</div>
+        <div class="footer">Gegenereerd door Team Level Up Match Report Creator ({APP_VERSION})</div>
     </body>
     </html>
     """
@@ -605,7 +616,11 @@ if data:
     category = match_info.get("category", "B")
     fmt_val = match_info.get("format", 11)
     half_duration = match_info.get("half_duration", 45)
+    
+    has_extra_time = match_info.get("extra_time", False)
     total_match_minutes = half_duration * 2
+    if has_extra_time:
+        total_match_minutes += 30  # Standaard verlengingstijd toevoegen indien van toepassing
 
     home_data = teams_info.get("home", {}) if isinstance(teams_info, dict) else data.get("home", [])
     starters_h, subs_h = extract_roster(home_data)

@@ -12,7 +12,7 @@ try:
 except Exception:
     WEASYPRINT_AVAILABLE = False
 
-APP_VERSION = "v1.9.1 - Lineups Sorted by Number"
+APP_VERSION = "v1.9.2 - Merged: Rust/Pause Subs & Number Sorting"
 
 # -----------------------------------------------------------------------------
 # Pagina Configuratie
@@ -48,20 +48,29 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# Helper Functies
+# Helper Functies & Tijd parsing
 # -----------------------------------------------------------------------------
 def clean_player_name(raw_name):
-    """Verwijdert rugnummers/voorvoegsels uit de spelersnaam."""
+    """Verwijdert rugnummers/voorvoegsels, haakjes (bijv. (Rust/Pauze)) en extra spaties."""
     if not raw_name:
         return ""
-    return re.sub(r'^\d+[\.\s\-]+', '', str(raw_name)).strip()
+    # Verwijder alles tussen haakjes
+    name_no_bracket = re.sub(r'\(.*?\)', '', str(raw_name))
+    # Verwijder beginnummers (bijv. '1. Naam') en strip spaties
+    cleaned = re.sub(r'^\d+[\.\s\-]+', '', name_no_bracket).strip()
+    return cleaned
 
-def parse_time_to_minutes(time_str, half_duration=45):
+def parse_time_to_minutes(time_str, extra_str="", half_duration=45):
     """
-    Zet tijden zoals 'P1 | 24:57' om naar 24.95
-    en 'P2 | 13:51' naar 45 + 13.85 = 58.85
+    Zet tijden zoals 'P1 | 00:13' of 'P2 | 13:51' om naar totale minuten.
+    Als '(Rust/Pauze)' of 'Rust' in de extra string staat, geldt de start van de 2e helft (45 min).
     """
     try:
+        # Controleer op expliciete rust/pauze wissels
+        extra_upper = str(extra_str).upper()
+        if "RUST" in extra_upper or "PAUZE" in extra_upper:
+            return float(half_duration)
+
         s = str(time_str).strip()
         period_offset = 0.0
 
@@ -85,7 +94,7 @@ def parse_time_to_minutes(time_str, half_duration=45):
         return 0.0
 
 # -----------------------------------------------------------------------------
-# Logica voor Begin-opstelling & Wissels (v1.9.0 Sortering)
+# Logica voor Begin-opstelling & Wissels (v1.9.1 Sortering op Nummer)
 # -----------------------------------------------------------------------------
 def derive_initial_rosters(starters_raw, subs_raw, events_info, team_key):
     """
@@ -96,7 +105,6 @@ def derive_initial_rosters(starters_raw, subs_raw, events_info, team_key):
     all_players = []
     seen = set()
 
-    # Verzamel alle unieke spelers uit de invoer
     for p in (starters_raw or []) + (subs_raw or []):
         name = clean_player_name(p.get('name', ''))
         if name and name.lower() not in seen:
@@ -107,13 +115,10 @@ def derive_initial_rosters(starters_raw, subs_raw, events_info, team_key):
                 'raw_name': p.get('name', '')
             })
 
-    # Huidige situatie opstellen op basis van starters_raw
     starter_names = {clean_player_name(p.get('name', '')).lower() for p in (starters_raw or [])}
     
-    # Traceer wissels van achteren naar voren om de beginsituatie te herstellen
     sub_events = [ev for ev in events_info if not ev.get('marker') and ev.get('team') == team_key and ("Wissel" in str(ev.get('event', '')) or "🔄" in str(ev.get('icon', '')))]
     
-    # Draai de wissels om van laatst naar eerst
     for ev in reversed(sub_events):
         p_out_name, p_in_name = None, None
         extra_val = str(ev.get('extra', ''))
@@ -129,10 +134,8 @@ def derive_initial_rosters(starters_raw, subs_raw, events_info, team_key):
             p_out_name = clean_player_name(parts[0]).lower()
             p_in_name = clean_player_name(parts[1]).lower()
 
-        # Terug in de tijd: Wie eruit ging stond er vóór de wissel in (dus starter)
         if p_out_name:
             starter_names.add(p_out_name)
-        # Terug in de tijd: Wie erin kwam stond er vóór de wissel uit (dus geen starter)
         if p_in_name and p_in_name in starter_names:
             starter_names.remove(p_in_name)
 
@@ -145,14 +148,12 @@ def derive_initial_rosters(starters_raw, subs_raw, events_info, team_key):
         else:
             initial_subs.append(p)
 
-    # Helper functie voor numerieke sortering op rugnummer
     def sort_key(player):
         try:
             return int(player.get('number', 999))
         except (ValueError, TypeError):
             return 999
 
-    # Sorteer basis en wissels afzonderlijk op nummer
     initial_starters.sort(key=sort_key)
     initial_subs.sort(key=sort_key)
 
@@ -308,22 +309,23 @@ def calculate_player_minutes(starters_h, subs_h, starters_a, subs_a, events_info
         ev_icon = str(ev.get('icon', ''))
         
         if "Wissel" in ev_name or "🔄" in ev_icon:
-            t_min = parse_time_to_minutes(ev.get('time', 0), half_duration)
+            extra_val = str(ev.get('extra', ''))
+            player_val = str(ev.get('player', ''))
+
+            t_min = parse_time_to_minutes(ev.get('time', 0), extra_str=extra_val, half_duration=half_duration)
             team = ev.get('team', '')
             
             p_out_name, p_in_name = None, None
-            extra_val = str(ev.get('extra', ''))
-            player_val = str(ev.get('player', ''))
 
             if "In:" in extra_val and "Out:" in extra_val:
                 m_in = re.search(r'In:\s*([^\|]+)', extra_val)
                 m_out = re.search(r'Out:\s*([^\|]+)', extra_val)
-                if m_in: p_in_name = m_in.group(1).strip()
-                if m_out: p_out_name = m_out.group(1).strip()
+                if m_in: p_in_name = clean_player_name(m_in.group(1))
+                if m_out: p_out_name = clean_player_name(m_out.group(1))
             elif "->" in player_val:
                 parts = player_val.split("->")
-                p_out_name = parts[0].strip()
-                p_in_name = parts[1].strip()
+                p_out_name = clean_player_name(parts[0])
+                p_in_name = clean_player_name(parts[1])
 
             if p_out_name:
                 key_out = find_player_key(team, p_out_name)

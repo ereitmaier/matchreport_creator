@@ -12,7 +12,7 @@ try:
 except Exception:
     WEASYPRINT_AVAILABLE = False
 
-APP_VERSION = "v1.9.2 - Rust-wissels & Spaties Fix"
+APP_VERSION = "v1.9.3 - Clean PDF Subs & Rust Fix"
 
 # -----------------------------------------------------------------------------
 # Pagina Configuratie
@@ -54,7 +54,6 @@ def clean_player_name(raw_name):
     """Verwijdert rugnummers, haakjes en extra spaties uit de spelersnaam."""
     if not raw_name:
         return ""
-    # Strip eventuele (Rust/Pauze) tekst en nummers vóór de naam
     s = str(raw_name)
     s = re.sub(r'\(.*?\)', '', s)
     s = re.sub(r'^\d+[\.\s\-]+', '', s)
@@ -68,7 +67,6 @@ def parse_time_to_minutes(time_str, half_duration=45):
     try:
         s = str(time_str).strip().upper()
         
-        # Rust / Pauze direct op de helfttijd zetten (bijv. 45 min)
         if "RUST" in s or "PAUZE" in s:
             return float(half_duration)
 
@@ -298,6 +296,8 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
     ICON_TIMER = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/23f1.svg" class="icon-sm">'
     ICON_BALL = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/26bd.svg" class="icon-sm">'
     ICON_SUB = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f504.svg" class="icon-sm">'
+    ICON_IN = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f4e5.svg" class="icon-sm">'
+    ICON_OUT = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f4e4.svg" class="icon-sm">'
     ICON_STATS = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f4ca.svg" class="icon-md">'
     ICON_CARD = '<img src="https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/svg/1f3f7.svg" class="icon-md">'
 
@@ -312,6 +312,8 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
             
             ev_name = ev.get('event', '')
             ev_icon = ev.get('icon', '')
+            extra_val = str(ev.get('extra', ''))
+            player_val = str(ev.get('player', ''))
 
             if "⚽" in ev_icon or "Goal" in ev_name or "Doelpunt" in ev_name:
                 icon_html = ICON_BALL
@@ -322,12 +324,25 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
             else:
                 icon_html = ""
 
+            details_html = ""
+            if "Wissel" in ev_name or "🔄" in ev_icon:
+                m_in = re.search(r'In:\s*([^\|]+)', extra_val)
+                m_out = re.search(r'Out:\s*([^\|]+)', extra_val)
+                if m_in and m_out:
+                    p_in = clean_player_name(m_in.group(1))
+                    p_out = clean_player_name(m_out.group(1))
+                    details_html = f"{ICON_IN} {p_in} &nbsp;|&nbsp; {ICON_OUT} {p_out}"
+                else:
+                    details_html = f"{player_val} ({extra_val})"
+            else:
+                details_html = f"{clean_player_name(player_val)} {f'({extra_val})' if extra_val else ''}"
+
             events_html += f"""
             <tr>
                 <td><b>{t_str}</b></td>
                 <td>{icon_html}{ev_name}{og}</td>
                 <td>{team_name}</td>
-                <td>{ev.get('player', '-')} {f"({ev.get('extra')})" if ev.get('extra') else ''}</td>
+                <td>{details_html}</td>
             </tr>
             """
 

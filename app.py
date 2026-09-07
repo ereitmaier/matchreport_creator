@@ -12,7 +12,7 @@ try:
 except Exception:
     WEASYPRINT_AVAILABLE = False
 
-APP_VERSION = "v1.9.2 - Merged: Rust/Pause Subs & Number Sorting"
+APP_VERSION = "v1.9.2 - Rust-wissels & Spaties Fix"
 
 # -----------------------------------------------------------------------------
 # Pagina Configuratie
@@ -48,32 +48,31 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# Helper Functies & Tijd parsing
+# Helper Functies
 # -----------------------------------------------------------------------------
 def clean_player_name(raw_name):
-    """Verwijdert rugnummers/voorvoegsels, haakjes (bijv. (Rust/Pauze)) en extra spaties."""
+    """Verwijdert rugnummers, haakjes en extra spaties uit de spelersnaam."""
     if not raw_name:
         return ""
-    # Verwijder alles tussen haakjes
-    name_no_bracket = re.sub(r'\(.*?\)', '', str(raw_name))
-    # Verwijder beginnummers (bijv. '1. Naam') en strip spaties
-    cleaned = re.sub(r'^\d+[\.\s\-]+', '', name_no_bracket).strip()
-    return cleaned
+    # Strip eventuele (Rust/Pauze) tekst en nummers vóór de naam
+    s = str(raw_name)
+    s = re.sub(r'\(.*?\)', '', s)
+    s = re.sub(r'^\d+[\.\s\-]+', '', s)
+    return s.strip()
 
-def parse_time_to_minutes(time_str, extra_str="", half_duration=45):
+def parse_time_to_minutes(time_str, half_duration=45):
     """
-    Zet tijden zoals 'P1 | 00:13' of 'P2 | 13:51' om naar totale minuten.
-    Als '(Rust/Pauze)' of 'Rust' in de extra string staat, geldt de start van de 2e helft (45 min).
+    Zet tijden om naar minuten. 
+    Verwerkt ook 'RUST', 'PAUZE', 'P1 | 20:19' en 'P2 | 10:00'.
     """
     try:
-        # Controleer op expliciete rust/pauze wissels
-        extra_upper = str(extra_str).upper()
-        if "RUST" in extra_upper or "PAUZE" in extra_upper:
+        s = str(time_str).strip().upper()
+        
+        # Rust / Pauze direct op de helfttijd zetten (bijv. 45 min)
+        if "RUST" in s or "PAUZE" in s:
             return float(half_duration)
 
-        s = str(time_str).strip()
         period_offset = 0.0
-
         if "P2" in s:
             period_offset = float(half_duration)
             s = s.replace("P2", "").replace("|", "").strip()
@@ -92,72 +91,6 @@ def parse_time_to_minutes(time_str, extra_str="", half_duration=45):
         return period_offset + mins
     except Exception:
         return 0.0
-
-# -----------------------------------------------------------------------------
-# Logica voor Begin-opstelling & Wissels (v1.9.1 Sortering op Nummer)
-# -----------------------------------------------------------------------------
-def derive_initial_rosters(starters_raw, subs_raw, events_info, team_key):
-    """
-    Herleidt de exacte beginopstelling en beginwissels.
-    Reconstrueert wissels terug in de tijd om te zien wie er écht begon op minuut 0.
-    Sorteert de lijsten vervolgens op rugnummer (numeriek).
-    """
-    all_players = []
-    seen = set()
-
-    for p in (starters_raw or []) + (subs_raw or []):
-        name = clean_player_name(p.get('name', ''))
-        if name and name.lower() not in seen:
-            seen.add(name.lower())
-            all_players.append({
-                'number': p.get('number', ''),
-                'name': name,
-                'raw_name': p.get('name', '')
-            })
-
-    starter_names = {clean_player_name(p.get('name', '')).lower() for p in (starters_raw or [])}
-    
-    sub_events = [ev for ev in events_info if not ev.get('marker') and ev.get('team') == team_key and ("Wissel" in str(ev.get('event', '')) or "🔄" in str(ev.get('icon', '')))]
-    
-    for ev in reversed(sub_events):
-        p_out_name, p_in_name = None, None
-        extra_val = str(ev.get('extra', ''))
-        player_val = str(ev.get('player', ''))
-
-        if "In:" in extra_val and "Out:" in extra_val:
-            m_in = re.search(r'In:\s*([^\|]+)', extra_val)
-            m_out = re.search(r'Out:\s*([^\|]+)', extra_val)
-            if m_in: p_in_name = clean_player_name(m_in.group(1)).lower()
-            if m_out: p_out_name = clean_player_name(m_out.group(1)).lower()
-        elif "->" in player_val:
-            parts = player_val.split("->")
-            p_out_name = clean_player_name(parts[0]).lower()
-            p_in_name = clean_player_name(parts[1]).lower()
-
-        if p_out_name:
-            starter_names.add(p_out_name)
-        if p_in_name and p_in_name in starter_names:
-            starter_names.remove(p_in_name)
-
-    initial_starters = []
-    initial_subs = []
-
-    for p in all_players:
-        if p['name'].lower() in starter_names:
-            initial_starters.append(p)
-        else:
-            initial_subs.append(p)
-
-    def sort_key(player):
-        try:
-            return int(player.get('number', 999))
-        except (ValueError, TypeError):
-            return 999
-
-    initial_starters.sort(key=sort_key)
-    initial_subs.sort(key=sort_key)
-
-    return initial_starters, initial_subs
 
 # -----------------------------------------------------------------------------
 # Logica voor Doelpunten, Kaarten en Minuten
@@ -309,31 +242,28 @@ def calculate_player_minutes(starters_h, subs_h, starters_a, subs_a, events_info
         ev_icon = str(ev.get('icon', ''))
         
         if "Wissel" in ev_name or "🔄" in ev_icon:
-            extra_val = str(ev.get('extra', ''))
-            player_val = str(ev.get('player', ''))
-
-            t_min = parse_time_to_minutes(ev.get('time', 0), extra_str=extra_val, half_duration=half_duration)
+            t_min = parse_time_to_minutes(ev.get('time', 0), half_duration)
             team = ev.get('team', '')
             
             p_out_name, p_in_name = None, None
+            extra_val = str(ev.get('extra', ''))
+            player_val = str(ev.get('player', ''))
 
             if "In:" in extra_val and "Out:" in extra_val:
                 m_in = re.search(r'In:\s*([^\|]+)', extra_val)
                 m_out = re.search(r'Out:\s*([^\|]+)', extra_val)
-                if m_in: p_in_name = clean_player_name(m_in.group(1))
-                if m_out: p_out_name = clean_player_name(m_out.group(1))
+                if m_in: p_in_name = m_in.group(1).strip()
+                if m_out: p_out_name = m_out.group(1).strip()
             elif "->" in player_val:
                 parts = player_val.split("->")
-                p_out_name = clean_player_name(parts[0])
-                p_in_name = clean_player_name(parts[1])
+                p_out_name = parts[0].strip()
+                p_in_name = parts[1].strip()
 
             if p_out_name:
                 key_out = find_player_key(team, p_out_name)
                 if key_out and players[key_out]['on_field']:
-                    if players[key_out]['last_in'] is not None:
-                        players[key_out]['total_minutes'] += (t_min - players[key_out]['last_in'])
+                    players[key_out]['total_minutes'] += (t_min - players[key_out]['last_in'])
                     players[key_out]['on_field'] = False
-                    players[key_out]['last_in'] = None
 
             if p_in_name:
                 key_in = find_player_key(team, p_in_name)
@@ -404,7 +334,7 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
     def render_player_list(players):
         if not players:
             return "<i>Geen spelers opgegeven</i>"
-        return "<br>".join([f"#{p.get('number', '')} {p.get('name', '')}" for p in players])
+        return "<br>".join([f"#{p.get('number', '')} {clean_player_name(p.get('name', ''))}" for p in players])
 
     goalscorers_html = ""
     if goalscorers_list:
@@ -492,7 +422,7 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
             <div class="sub-info">Datum: {match_date} | Categorie {category} | Wedstrijdvorm: {fmt_val}v{fmt_val} | Speeltijd: 2x {half_duration} min</div>
         </div>
 
-        <div class="section-title">{ICON_LINEUP}Begin-opstellingen</div>
+        <div class="section-title">{ICON_LINEUP}Opstellingen</div>
         <table class="teams-table">
             <tr>
                 <td class="team-box">
@@ -663,14 +593,10 @@ if data:
     total_match_minutes = half_duration * 2
 
     home_data = teams_info.get("home", {}) if isinstance(teams_info, dict) else data.get("home", [])
-    starters_h_raw, subs_h_raw = extract_roster(home_data)
+    starters_h, subs_h = extract_roster(home_data)
 
     away_data = teams_info.get("away", {}) if isinstance(teams_info, dict) else data.get("away", [])
-    starters_a_raw, subs_a_raw = extract_roster(away_data)
-
-    # Herleid de echte beginopstellingen door wisselgebeurtenissen terug te rekenen
-    starters_h, subs_h = derive_initial_rosters(starters_h_raw, subs_h_raw, events_info, 'home')
-    starters_a, subs_a = derive_initial_rosters(starters_a_raw, subs_a_raw, events_info, 'away')
+    starters_a, subs_a = extract_roster(away_data)
 
     home_score = 0
     away_score = 0
@@ -723,7 +649,7 @@ if data:
         data=pdf_file_data,
         file_name=f"rapport_{match_date}_{home_team}_vs_{away_team}.{file_ext}",
         mime=mime_type,
-        width='stretch'
+        use_container_width=True
     )
 
     tab_log, tab_lineup, tab_stats, tab_raw = st.tabs(["📋 Live Wedstrijdverloop", "👥 Opstellingen", "📊 Statistieken", "📄 Ruwe Data & Export"])
@@ -748,12 +674,12 @@ if data:
                         "Tijd": ev.get("time", ""),
                         "Gebeurtenis": f"{ev.get('icon', '')} {ev.get('event', '')}{og_label}",
                         "Team": t_label,
-                        "Speler": ev.get("player", "-"),
+                        "Speler": clean_player_name(ev.get("player", "-")),
                         "Details": ev.get("extra", "")
                     })
             
             df_log = pd.DataFrame(log_data)
-            st.dataframe(df_log, width='stretch', hide_index=True)
+            st.dataframe(df_log, use_container_width=True, hide_index=True)
         else:
             st.info("Geen gebeurtenissen geregistreerd in dit bestand.")
 
@@ -764,28 +690,28 @@ if data:
             st.markdown("**Begin-opstelling:**")
             if starters_h:
                 for p in starters_h:
-                    st.write(f"• #{p.get('number', '')} {p.get('name', '')}")
+                    st.write(f"• #{p.get('number', '')} {clean_player_name(p.get('name', ''))}")
             else:
                 st.caption("Geen spelers opgegeven.")
 
             if subs_h:
-                st.markdown("**Wisselspelers bij Aftrap:**")
+                st.markdown("**Wisselspelers:**")
                 for p in subs_h:
-                    st.write(f"• #{p.get('number', '')} {p.get('name', '')}")
+                    st.write(f"• #{p.get('number', '')} {clean_player_name(p.get('name', ''))}")
 
         with col_a:
             st.subheader(f"🚩 {away_team}")
             st.markdown("**Begin-opstelling:**")
             if starters_a:
                 for p in starters_a:
-                    st.write(f"• #{p.get('number', '')} {p.get('name', '')}")
+                    st.write(f"• #{p.get('number', '')} {clean_player_name(p.get('name', ''))}")
             else:
                 st.caption("Geen spelers opgegeven.")
 
             if subs_a:
-                st.markdown("**Wisselspelers bij Aftrap:**")
+                st.markdown("**Wisselspelers:**")
                 for p in subs_a:
-                    st.write(f"• #{p.get('number', '')} {p.get('name', '')}")
+                    st.write(f"• #{p.get('number', '')} {clean_player_name(p.get('name', ''))}")
 
     with tab_stats:
         col_g, col_c = st.columns(2)
@@ -801,7 +727,7 @@ if data:
                     }
                     for g in goalscorers_list
                 ])
-                st.dataframe(df_goals, width='stretch', hide_index=True)
+                st.dataframe(df_goals, use_container_width=True, hide_index=True)
             else:
                 st.info("Geen doelpunten gescoord.")
 
@@ -818,7 +744,7 @@ if data:
                     }
                     for c in cards_list
                 ])
-                st.dataframe(df_cards, width='stretch', hide_index=True)
+                st.dataframe(df_cards, use_container_width=True, hide_index=True)
             else:
                 st.info("Geen kaarten gegeven.")
 
@@ -834,7 +760,7 @@ if data:
             }
             for p in minutes_list
         ])
-        st.dataframe(df_minutes, width='stretch', hide_index=True)
+        st.dataframe(df_minutes, use_container_width=True, hide_index=True)
 
     with tab_raw:
         st.subheader("Exporteer Opties")
@@ -845,7 +771,7 @@ if data:
                 data=pdf_file_data,
                 file_name=f"rapport_{match_date}_{home_team}_vs_{away_team}.{file_ext}",
                 mime=mime_type,
-                width='stretch'
+                use_container_width=True
             )
         with col_exp2:
             yaml_string = yaml.dump(data, default_flow_style=False, allow_unicode=True)
@@ -854,7 +780,7 @@ if data:
                 data=yaml_string,
                 file_name=f"export_match_{match_date}_{home_team}.yaml",
                 mime="text/yaml",
-                width='stretch'
+                use_container_width=True
             )
 
         st.markdown("---")

@@ -12,7 +12,7 @@ try:
 except Exception:
     WEASYPRINT_AVAILABLE = False
 
-APP_VERSION = "v1.9.4 - Rust & Verlenging Subs Support"
+APP_VERSION = "v1.9.5 - Simple Mode Support"
 
 # -----------------------------------------------------------------------------
 # Pagina Configuratie
@@ -292,7 +292,7 @@ def calculate_player_minutes(starters_h, subs_h, starters_a, subs_a, events_info
 # -----------------------------------------------------------------------------
 # PDF Generator
 # -----------------------------------------------------------------------------
-def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, starters_a, subs_a, events_info, minutes_list, goalscorers_list, cards_list):
+def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, starters_a, subs_a, events_info, minutes_list, goalscorers_list, cards_list, simple_mode=False):
     home_team = match_info.get("home", "Thuisploeg")
     away_team = match_info.get("away", "Uitploeg")
     match_date = match_info.get("date", "Onbekend")
@@ -391,16 +391,36 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
     else:
         cards_html = "<tr><td colspan='4'><i>Geen kaarten gegeven in deze wedstrijd</i></td></tr>"
 
-    minutes_html = ""
-    for p in minutes_list:
-        t_label = home_team if p['team'] == 'home' else away_team
-        minutes_html += f"""
-        <tr>
-            <td>#{p['number']}</td>
-            <td><b>{p['clean_name']}</b></td>
-            <td>{t_label}</td>
-            <td><b>{int(p['total_minutes'])} min</b></td>
-        </tr>
+    minutes_html_section = ""
+    if not simple_mode:
+        minutes_rows = ""
+        for p in minutes_list:
+            t_label = home_team if p['team'] == 'home' else away_team
+            minutes_rows += f"""
+            <tr>
+                <td>#{p['number']}</td>
+                <td><b>{p['clean_name']}</b></td>
+                <td>{t_label}</td>
+                <td><b>{int(p['total_minutes'])} min</b></td>
+            </tr>
+            """
+        minutes_html_section = f"""
+        <div class="keep-together">
+            <div class="section-title">{ICON_STATS}Totaal Gespeelde Minuten per Speler</div>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th width="10%">#</th>
+                        <th width="40%">Speler</th>
+                        <th width="30%">Team</th>
+                        <th width="20%">Gespeelde Minuten</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {minutes_rows}
+                </tbody>
+            </table>
+        </div>
         """
 
     html_content = f"""
@@ -512,22 +532,7 @@ def generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, 
             </table>
         </div>
 
-        <div class="keep-together">
-            <div class="section-title">{ICON_STATS}Totaal Gespeelde Minuten per Speler</div>
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th width="10%">#</th>
-                        <th width="40%">Speler</th>
-                        <th width="30%">Team</th>
-                        <th width="20%">Gespeelde Minuten</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {minutes_html}
-                </tbody>
-            </table>
-        </div>
+        {minutes_html_section}
 
         <div class="footer">Gegenereerd door Team Level Up Match Report Creator ({APP_VERSION})</div>
     </body>
@@ -610,6 +615,7 @@ if data:
     teams_info = data.get("teams", {})
     events_info = data.get("events", [])
 
+    simple_mode = match_info.get("simple_mode", False)
     home_team = match_info.get("home", "Thuisploeg")
     away_team = match_info.get("away", "Uitploeg")
     match_date = match_info.get("date", "Onbekend")
@@ -620,7 +626,7 @@ if data:
     has_extra_time = match_info.get("extra_time", False)
     total_match_minutes = half_duration * 2
     if has_extra_time:
-        total_match_minutes += 30  # Standaard verlengingstijd toevoegen indien van toepassing
+        total_match_minutes += 30
 
     home_data = teams_info.get("home", {}) if isinstance(teams_info, dict) else data.get("home", [])
     starters_h, subs_h = extract_roster(home_data)
@@ -670,7 +676,7 @@ if data:
 
     st.divider()
 
-    pdf_file_data = generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, starters_a, subs_a, events_info, minutes_list, goalscorers_list, cards_list)
+    pdf_file_data = generate_pdf_report(match_info, home_score, away_score, starters_h, subs_h, starters_a, subs_a, events_info, minutes_list, goalscorers_list, cards_list, simple_mode=simple_mode)
     mime_type = "application/pdf" if WEASYPRINT_AVAILABLE else "text/html"
     file_ext = "pdf" if WEASYPRINT_AVAILABLE else "html"
 
@@ -778,19 +784,19 @@ if data:
             else:
                 st.info("Geen kaarten gegeven.")
 
-        st.divider()
-
-        st.subheader("⏱️ Gespeelde Minuten per Speler")
-        df_minutes = pd.DataFrame([
-            {
-                "Rugnummer": p['number'],
-                "Speler": p['clean_name'],
-                "Team": home_team if p['team'] == 'home' else away_team,
-                "Gespeelde Minuten": f"{int(p['total_minutes'])} min"
-            }
-            for p in minutes_list
-        ])
-        st.dataframe(df_minutes, use_container_width=True, hide_index=True)
+        if not simple_mode:
+            st.divider()
+            st.subheader("⏱️ Gespeelde Minuten per Speler")
+            df_minutes = pd.DataFrame([
+                {
+                    "Rugnummer": p['number'],
+                    "Speler": p['clean_name'],
+                    "Team": home_team if p['team'] == 'home' else away_team,
+                    "Gespeelde Minuten": f"{int(p['total_minutes'])} min"
+                }
+                for p in minutes_list
+            ])
+            st.dataframe(df_minutes, use_container_width=True, hide_index=True)
 
     with tab_raw:
         st.subheader("Exporteer Opties")
